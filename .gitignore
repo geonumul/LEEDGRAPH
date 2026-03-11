@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# 환경변수 (절대 커밋 금지)
+.env
+*.env
+
+# 데이터 파일 (용량 크거나 민감 데이터)
+data/raw/*.xlsx
+data/raw/*.pdf
+data/raw/scorecards/
+data/processed/*.csv
+data/processed/*.parquet
+
+# 학습된 모델
+outputs/models/
+*.pkl
+*.joblib
+
+# 결과물 (선택적 제외)
+# outputs/figures/
+# outputs/reports/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
