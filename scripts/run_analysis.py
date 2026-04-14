@@ -113,32 +113,41 @@ def train_xgboost(X: pd.DataFrame, y: pd.Series) -> tuple:
         verbosity=0,
     )
 
-    # 5-fold CV
+    # 5-fold CV (accuracy + weighted F1 - 논문용 지표)
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    cv_scores = cross_val_score(model, X, y, cv=cv, scoring="accuracy")
-    print(f"\n5-Fold CV Accuracy: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+    cv_scores    = cross_val_score(model, X, y, cv=cv, scoring="accuracy")
+    cv_f1_scores = cross_val_score(model, X, y, cv=cv, scoring="f1_weighted")
+    print(f"\n5-Fold CV Accuracy:    {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
     print(f"  각 Fold: {[f'{s:.4f}' for s in cv_scores]}")
+    print(f"5-Fold CV F1 (weighted): {cv_f1_scores.mean():.4f} ± {cv_f1_scores.std():.4f}")
 
-    # 전체 데이터 학습
+    # 전체 데이터 학습 (SHAP용 - train 지표는 과적합이므로 논문에 미사용)
     model.fit(X, y)
-    y_pred = model.predict(X)
-    acc = accuracy_score(y, y_pred)
-    f1  = f1_score(y, y_pred, average="weighted")
+    y_pred   = model.predict(X)
+    acc      = accuracy_score(y, y_pred)
+    f1_train = f1_score(y, y_pred, average="weighted")
 
-    print(f"\n전체 데이터 Accuracy: {acc:.4f}")
-    print(f"Weighted F1-Score: {f1:.4f}")
+    print(f"\n전체 데이터 Accuracy: {acc:.4f}  ← 과적합 지표, 논문에 미사용")
+    print(f"Weighted F1-Score (train): {f1_train:.4f}  ← 동일, 논문에 미사용")
+    print(f"[논문용] CV Accuracy={cv_scores.mean():.4f}, CV F1={cv_f1_scores.mean():.4f}")
     print("\n분류 리포트:")
     print(classification_report(y, y_pred, target_names=[GRADE_NAMES[i] for i in range(4)]))
 
     metrics = {
-        "cv_accuracy_mean":  round(float(cv_scores.mean()), 4),
-        "cv_accuracy_std":   round(float(cv_scores.std()), 4),
-        "cv_scores":         [round(float(s), 4) for s in cv_scores],
-        "train_accuracy":    round(float(acc), 4),
-        "weighted_f1":       round(float(f1), 4),
-        "n_samples":         int(len(y)),
-        "n_features":        int(X.shape[1]),
-        "model":             "XGBoost",
+        # 논문에 사용할 CV 기반 지표
+        "cv_accuracy_mean":     round(float(cv_scores.mean()), 4),
+        "cv_accuracy_std":      round(float(cv_scores.std()), 4),
+        "cv_scores":            [round(float(s), 4) for s in cv_scores],
+        "cv_f1_weighted_mean":  round(float(cv_f1_scores.mean()), 4),
+        "cv_f1_weighted_std":   round(float(cv_f1_scores.std()), 4),
+        "cv_f1_scores":         [round(float(s), 4) for s in cv_f1_scores],
+        # 참고용 train 지표 (과적합 - 논문 미사용)
+        "train_accuracy":       round(float(acc), 4),
+        "train_weighted_f1":    round(float(f1_train), 4),
+        "note_train_metrics":   "과적합 지표 - 논문에는 CV 지표(cv_accuracy_mean, cv_f1_weighted_mean) 사용",
+        "n_samples":            int(len(y)),
+        "n_features":           int(X.shape[1]),
+        "model":                "XGBoost",
         "params": {
             "n_estimators": 200, "max_depth": 6,
             "learning_rate": 0.05, "subsample": 0.8,
@@ -333,10 +342,12 @@ def write_report(metrics: dict, importance_df: pd.DataFrame, y: pd.Series):
         f"| 샘플 수 | {metrics['n_samples']} |",
         f"| Feature 수 | {metrics['n_features']} |",
         f"| 5-Fold CV Accuracy | **{metrics['cv_accuracy_mean']:.4f} ± {metrics['cv_accuracy_std']:.4f}** |",
-        f"| Train Accuracy | {metrics['train_accuracy']:.4f} |",
-        f"| Weighted F1-Score | {metrics['weighted_f1']:.4f} |",
+        f"| 5-Fold CV Weighted F1 | **{metrics['cv_f1_weighted_mean']:.4f} ± {metrics['cv_f1_weighted_std']:.4f}** |",
+        f"| Train Accuracy (참고, 과적합) | {metrics['train_accuracy']:.4f} |",
+        f"| Train Weighted F1 (참고, 과적합) | {metrics['train_weighted_f1']:.4f} |",
         "",
-        f"CV 각 Fold: {metrics['cv_scores']}",
+        f"CV Accuracy Folds: {metrics['cv_scores']}",
+        f"CV F1 Folds: {metrics['cv_f1_scores']}",
         "",
         "---",
         "",

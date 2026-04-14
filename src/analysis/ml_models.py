@@ -114,15 +114,19 @@ class LEEDMLTrainer:
 
         print(f"{cv_folds}-Fold 교차 검증 시작...\n")
         for name, model in models.items():
-            scores = cross_val_score(model, X, y, cv=cv, scoring="accuracy")
+            acc_scores = cross_val_score(model, X, y, cv=cv, scoring="accuracy")
+            f1_scores  = cross_val_score(model, X, y, cv=cv, scoring="f1_weighted")
             results.append({
                 "Model": name,
-                "Mean_Accuracy": scores.mean(),
-                "Std_Accuracy": scores.std(),
-                "Min_Accuracy": scores.min(),
-                "Max_Accuracy": scores.max(),
+                "Mean_Accuracy": acc_scores.mean(),
+                "Std_Accuracy":  acc_scores.std(),
+                "Min_Accuracy":  acc_scores.min(),
+                "Max_Accuracy":  acc_scores.max(),
+                "CV_F1_Weighted": f1_scores.mean(),
+                "CV_F1_Weighted_Std": f1_scores.std(),
             })
-            print(f"  {name}: {scores.mean():.4f} ± {scores.std():.4f}")
+            print(f"  {name}: acc={acc_scores.mean():.4f} ± {acc_scores.std():.4f} | "
+                  f"f1_weighted={f1_scores.mean():.4f} ± {f1_scores.std():.4f}")
 
         results_df = pd.DataFrame(results).sort_values("Mean_Accuracy", ascending=False)
 

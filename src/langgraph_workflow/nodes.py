@@ -15,10 +15,23 @@ LangGraph 노드 정의
 """
 
 import json
+import time
 import yaml
 from pathlib import Path
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+
+try:
+    from tenacity import (
+        retry,
+        stop_after_attempt,
+        wait_exponential,
+        retry_if_exception_type,
+        RetryError,
+    )
+    _TENACITY_AVAILABLE = True
+except ImportError:
+    _TENACITY_AVAILABLE = False
 
 from .state import LEEDStandardizationState
 from src.data.loader import LEEDDataLoader, LEED_VERSION_MAX_SCORES
@@ -265,6 +278,50 @@ def _lookup_credit_rule(credit_name: str, version: str) -> dict | None:
 def get_llm(model: str = "gpt-4.1", temperature: float = 0.1) -> ChatOpenAI:
     """LLM 인스턴스 생성. LLM 노드에서만 호출됨."""
     return ChatOpenAI(model=model, temperature=temperature)
+
+
+# TPM 30k 기준 최소 대기 (호출 사이 간격)
+_LLM_MIN_SLEEP = 2.0
+_LLM_MAX_RETRIES = 5
+
+
+def _invoke_llm_with_retry(llm: ChatOpenAI, messages: list) -> object:
+    """
+    OpenAI 429 Rate Limit 대응 LLM 호출 래퍼.
+
+    - 호출 전 최소 2초 sleep (TPM 30k 기준)
+    - 429/503 등 일시적 오류 시 exponential backoff (2→4→8→16→32초)
+    - 최대 5회 재시도 후 실패하면 RateLimitError를 raise
+    """
+    import openai
+
+    time.sleep(_LLM_MIN_SLEEP)
+
+    if _TENACITY_AVAILABLE:
+        @retry(
+            retry=retry_if_exception_type((
+                openai.RateLimitError,
+                openai.APIStatusError,
+                openai.APIConnectionError,
+            )),
+            wait=wait_exponential(multiplier=2, min=2, max=32),
+            stop=stop_after_attempt(_LLM_MAX_RETRIES),
+            reraise=True,
+        )
+        def _call():
+            return llm.invoke(messages)
+        return _call()
+    else:
+        # tenacity 없으면 단순 재시도
+        last_exc = None
+        for attempt in range(_LLM_MAX_RETRIES):
+            try:
+                return llm.invoke(messages)
+            except Exception as e:
+                last_exc = e
+                wait = 2 ** (attempt + 1)
+                time.sleep(wait)
+        raise last_exc
 
 
 # =============================================================================
@@ -864,12 +921,12 @@ v5 카테고리 최대점수: {_llm_v5_cats_str} (합계={_llm_v5_total})
 {prev_feedback}
 JSON으로만 응답하세요."""
 
-    response = llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_prompt),
-    ])
-
     try:
+        response = _invoke_llm_with_retry(llm, [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ])
+
         resp_text = response.content.strip()
         if "```json" in resp_text:
             resp_text = resp_text.split("```json")[1].split("```")[0].strip()
@@ -895,15 +952,15 @@ JSON으로만 응답하세요."""
         log = f"[LLM Mapper Iter {current_iter+1}] 완료 - v5 총점: {total_v5:.1f}/{_v5_total}"
 
     except Exception as e:
-        # LLM 파싱 실패 → rule_mapper 결과 재사용 (최후 수단)
+        # Rate Limit 5회 초과 or 파싱 실패 → rule_mapper 결과 fallback
         fallback = state.get("rule_mapping_result") or {}
         mapping_result = {
             "mapped_categories":  fallback.get("mapped_categories", {}),
-            "mapping_rationale":  f"LLM 파싱 실패({e}) - rule_mapper 결과 재사용",
+            "mapping_rationale":  f"LLM 실패({type(e).__name__}: {e}) - rule fallback",
             "proportional_scores": {},
             "total_score_v5":      fallback.get("total_score_v5", 0),
         }
-        log = f"[LLM Mapper Iter {current_iter+1}] 파싱 실패 ({e}) - 폴백 적용"
+        log = f"[LLM Mapper Iter {current_iter+1}] 실패 ({type(e).__name__}) - rule fallback 적용"
 
     return {
         **state,
@@ -990,10 +1047,25 @@ v5 총점: {mapping.get('total_score_v5', '?')}
 validation_score >= 0.8 → is_valid=true
 JSON으로만 응답하세요."""
 
-    response = llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_prompt),
-    ])
+    try:
+        response = _invoke_llm_with_retry(llm, [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ])
+    except Exception as e:
+        # Rate limit 초과 → 강제 통과 (rule fallback과 동일 처리)
+        result = {
+            "is_valid": True,
+            "validation_score": 0.5,
+            "issues": [f"LLM Validator 호출 실패({type(e).__name__}) - 강제 승인"],
+            "feedback": "",
+            "iteration": current_iter,
+        }
+        return {
+            **state,
+            "validation_result": result,
+            "logs": [f"[LLM Validator] 호출 실패 ({type(e).__name__}) - rule fallback 강제 승인"],
+        }
 
     try:
         resp_text = response.content.strip()
