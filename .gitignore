@@ -36,6 +36,12 @@ outputs/models/
 # outputs/figures/
 # outputs/reports/
 
+# Claude Code
+.claude/
+
+# 가상환경
+.venv_test/
+
 # IDE
 .vscode/
 .idea/

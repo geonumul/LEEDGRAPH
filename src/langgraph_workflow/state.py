@@ -36,31 +36,74 @@ class ValidationResult(TypedDict):
     iteration: int                  # 현재 반복 횟수
 
 
+class MathValidationResult(TypedDict):
+    """수학적(규칙 기반) 검증 결과 - LLM 없이 순수 Python으로 계산"""
+    passed: bool                    # 검증 통과 여부
+    issues: list                    # 발견된 문제 목록
+    achievement_ratio_original: float   # 원본 달성률 (achieved/max)
+    achievement_ratio_v5: float         # v5 매핑 후 달성률
+    ratio_drift: float              # 달성률 변화량 (절댓값)
+
+
 class LEEDStandardizationState(TypedDict):
     """
     LangGraph 전체 워크플로우 공유 State.
 
-    흐름:
-        [Mapper Agent] → [Validator Agent] → 검증 통과? → END
-                              ↑                   ↓ No
-                              └───────────────────┘ (순환)
-    """
-    # 입력 데이터
-    project: ProjectData
+    흐름 (1단계: 결정론적 경로 - LLM 없음):
+        pdf_ingest → csv_match → rule_mapper → hallucination_checker
+                                                    ↓ PASS
+                                                 finalize → END
 
-    # Mapper 출력 (매핑 결과)
+    흐름 (2단계: LLM 폴백 - hallucination_checker 실패 시):
+        hallucination_checker FAIL → llm_mapper → llm_validator
+                                         ↑              ↓ FAIL (반복)
+                                         └──────────────┘ (최대 3회)
+                                                       ↓ PASS
+                                                    finalize → END
+
+    설계 원칙:
+        - rule_mapper: 수식 기반 결정론적 매핑, 토큰 소모 없음
+        - hallucination_checker: 수학적 제약 검증, 토큰 소모 없음
+        - llm_mapper/llm_validator: 규칙으로 해결 불가한 엣지케이스만 처리
+    """
+    # 입력: PDF 경로 또는 직접 project dict
+    pdf_path: Optional[str]
+    directory_df: Optional[object]      # pd.DataFrame (LangGraph 직렬화 제외)
+
+    # PDF 파싱 결과
+    parsed_pdf: Optional[dict]
+
+    # CSV 매칭 결과
+    matched_building: Optional[dict]
+
+    # 입력 데이터 (csv_match_node에서 구성됨)
+    project: Optional[ProjectData]
+
+    # ── 결정론적 경로 ──────────────────────────────────────
+    # rule_mapper_node 출력
+    rule_mapping_result: Optional[MappingResult]
+
+    # hallucination_checker_node 출력
+    math_validation_result: Optional[MathValidationResult]
+
+    # ── LLM 폴백 경로 ──────────────────────────────────────
+    # llm_mapper_node 출력 (llm_validator도 이 값 사용)
     mapping_result: Optional[MappingResult]
 
-    # Validator 출력 (검증 결과)
+    # llm_validator_node 출력
     validation_result: Optional[ValidationResult]
 
-    # 반복 제어
-    max_iterations: int             # 최대 반복 횟수 (기본 3)
-    current_iteration: int          # 현재 반복 횟수
+    # ── 공통 제어 ──────────────────────────────────────────
+    # 현재 실행 경로: "rule" | "llm"
+    validation_mode: str
+
+    # LLM 경로 반복 횟수 (rule 경로는 반복 없음)
+    max_iterations: int
+    current_iteration: int
 
     # 최종 결과
-    final_v5_data: Optional[dict]   # 최종 표준화된 v5 데이터
+    final_v5_data: Optional[dict]
     status: str                     # "pending" | "completed" | "failed"
 
-    # 로그 (Annotated로 append 방식 누적)
+    # 로그 (Annotated → append 방식으로 누적)
     logs: Annotated[list, operator.add]
