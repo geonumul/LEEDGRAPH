@@ -88,6 +88,53 @@ def _extract_version_from_folder(path: Path) -> str:
     return "unknown"
 
 
+def _parse_v5_rubric_xlsx(filepath: Path) -> dict:
+    """
+    LEED v5 스코어카드 xlsx 파서 (v4와 포맷이 다름).
+
+    v5 xlsx 구조:
+        시트 1 (Cover): 설명만 있음
+        시트 2 (credit category view): 실제 데이터
+            - 카테고리 헤더 행: ['Category Name (CODE)', 'max_pts', '0']
+            - 크레딧 행: ['False', 'False', 'False', 'CREDITcode', 'Name', 'pts', '0']
+
+    Returns:
+        dict: {cat_code: max_points}  예) {"IP": 1, "LT": 15, "EQ": 13, ...}
+    """
+    try:
+        xl = pd.ExcelFile(filepath, engine="openpyxl")
+        if len(xl.sheet_names) < 2:
+            return {}
+        df = xl.parse(xl.sheet_names[1], header=None)
+    except Exception as e:
+        print(f"[RubricLoader] v5 읽기 실패: {filepath.name} ({e})")
+        return {}
+
+    cat_maxes: dict = {}
+    skip_words = {"total", "leed", "project", "yes", "maybe", "no", "how", "false", "true", "key"}
+
+    for _, row in df.iterrows():
+        vals = [str(v) for v in row.values if str(v) not in ("nan", "None", "")]
+        if not vals:
+            continue
+        # 카테고리 헤더 행: vals[0]에 '(CODE)' 형식, vals[1]이 만점
+        first = vals[0].lower()
+        if any(first.startswith(w) for w in skip_words):
+            continue
+        if "(" in vals[0] and len(vals) >= 2:
+            try:
+                pts = float(vals[1])
+                if pts > 0:
+                    code_m = re.search(r"\((\w+)\)", vals[0])
+                    if code_m:
+                        code = code_m.group(1).upper()
+                        cat_maxes[code] = int(pts)
+            except (ValueError, TypeError):
+                pass
+
+    return cat_maxes
+
+
 def _parse_rubric_xlsx(filepath: Path) -> dict:
     """
     LEED 스코어카드 xlsx에서 카테고리별 만점(Possible Points) 추출.
@@ -197,9 +244,19 @@ def load_all_rubrics(rubrics_dir: str = "data/raw/rubrics") -> dict:
 
     for xlsx_file in xlsx_files:
         version = _extract_version_from_folder(xlsx_file)
-        fname_key = xlsx_file.stem.lower()
+        # 폴더명에서 rating system 추출 (예: v4/BD+C_NewConstruction → "bd+c_newconstruction")
+        parts = xlsx_file.parts
+        rubrics_idx = next((i for i, p in enumerate(parts) if "rubrics" in p.lower()), -1)
+        if rubrics_idx >= 0 and rubrics_idx + 2 < len(parts):
+            fname_key = parts[rubrics_idx + 2].lower()   # rating system 폴더명 사용
+        else:
+            fname_key = xlsx_file.stem.lower()
 
-        cat_maxes = _parse_rubric_xlsx(xlsx_file)
+        # v5는 별도 파서 사용
+        if version == "v5":
+            cat_maxes = _parse_v5_rubric_xlsx(xlsx_file)
+        else:
+            cat_maxes = _parse_rubric_xlsx(xlsx_file)
         if not cat_maxes:
             continue
 

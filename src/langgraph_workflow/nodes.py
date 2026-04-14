@@ -28,22 +28,55 @@ _RUBRIC_CACHE: dict = load_all_rubrics()
 
 
 # =============================================================================
-# 상수: v5 카테고리 최대 점수 (BD+C 기준)
-# LEED v5 BD+C New Construction 기준값 (2024 공식 발표)
-# O+M / ID+C 등 시스템마다 달라질 수 있으나, 최종 표준화 목표 기준은 BD+C v5로 통일
+# 상수: v5 카테고리 최대 점수 (rating system별, 실제 v5 xlsx 기반)
+# v5부터 총점이 100점으로 변경되었고, IN/RP 카테고리가 폐지됨.
+# IEQ → EQ 코드 변경.
 # =============================================================================
-V5_MAX: dict = {
-    "LT":  16,   # Location & Transportation
-    "SS":  10,   # Sustainable Sites
-    "WE":  12,   # Water Efficiency
-    "EA":  33,   # Energy & Atmosphere
-    "MR":  13,   # Materials & Resources
-    "IEQ": 16,   # Indoor Environmental Quality
-    "IN":   6,   # Innovation
-    "RP":   4,   # Regional Priority
-    "IP":   2,   # Integrative Process
-    # TOTAL = 110
-}
+
+# BD+C (New Construction, Core and Shell, Data Centers 등)
+V5_MAX_BDC: dict = {
+    "IP":  1,   # Integrative Process
+    "LT": 15,   # Location & Transportation
+    "SS": 11,   # Sustainable Sites
+    "WE":  9,   # Water Efficiency
+    "EA": 33,   # Energy and Atmosphere
+    "MR": 18,   # Materials & Resources
+    "EQ": 13,   # Indoor Environmental Quality (v5에서 IEQ → EQ 코드 변경)
+}  # Total = 100
+
+# ID+C (Commercial Interiors, Retail, Hospitality)
+V5_MAX_IDC: dict = {
+    "IP":  1,
+    "LT": 14,
+    "WE": 10,
+    "EA": 31,
+    "MR": 26,
+    "EQ": 18,
+}  # Total = 100 (SS 카테고리 없음)
+
+# O+M (Existing Buildings, Warehouses 등)
+V5_MAX_OM: dict = {
+    "IP":  2,
+    "LT":  8,
+    "SS":  2,
+    "WE": 15,
+    "EA": 34,
+    "MR": 13,
+    "EQ": 26,
+}  # Total = 100
+
+V5_TOTAL = 100  # v5 만점 (모든 rating system 공통)
+
+# 하위 호환: rule_mapper/hallucination_checker에서 _get_v5_max()로 동적 선택
+def _get_v5_max(leed_system: str) -> dict:
+    """leed_system 문자열에서 v5 카테고리 만점 테이블 선택."""
+    s = leed_system.lower()
+    if "o+m" in s or "o&m" in s or "operation" in s or "maintenance" in s:
+        return V5_MAX_OM
+    elif "id+c" in s or "interior" in s:
+        return V5_MAX_IDC
+    else:
+        return V5_MAX_BDC  # BD+C 또는 unknown
 
 # =============================================================================
 # 상수: 버전별 BD+C 기준 카테고리 최대 점수
@@ -77,9 +110,9 @@ VERSION_BD_C_MAX: dict = {
     # 나머지는 v5와 동일 → 직접 매핑 가능
     "v4.1": {"LT": 16, "SS": 10, "WE": 12, "EA": 33, "MR": 13, "IEQ": 16, "IN": 6, "RP": 4, "IP": 2},
 
-    # ── v5 (총점 110점 체계) ──────────────────────────────────────────────
-    # v4.1과 구조 동일. 이미 v5 → 변환 없음.
-    "v5":   {"LT": 16, "SS": 10, "WE": 12, "EA": 33, "MR": 13, "IEQ": 16, "IN": 6, "RP": 4, "IP": 2},
+    # ── v5 (총점 100점 체계, BD+C 기준) ──────────────────────────────────
+    # IN/RP 폐지, IEQ→EQ, 총점 110→100
+    "v5":   {"IP": 1, "LT": 15, "SS": 11, "WE": 9, "EA": 33, "MR": 18, "EQ": 13},
 }
 
 # =============================================================================
@@ -342,6 +375,9 @@ def rule_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationStat
     cats_possible = project.get("categories_possible", {})  # PDF에서 파싱한 만점
     leed_system = project.get("leed_system", "")
 
+    # ── v5 만점 테이블 (rating system별) ──────────────────────────────────
+    v5_max = _get_v5_max(leed_system)
+
     # ── 버전별 BD+C 기준 만점 테이블 ──────────────────────────────────────
     # unknown 버전은 v4로 fallback (한국 건물 중 가장 많은 비중)
     bd_c_max = VERSION_BD_C_MAX.get(version, VERSION_BD_C_MAX["v4"])
@@ -358,7 +394,7 @@ def rule_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationStat
         rubric_max = get_rubric_max(_RUBRIC_CACHE, version, leed_system, cat)
         if rubric_max is not None and rubric_max > 0:
             return float(rubric_max)
-        return float(bd_c_max.get(cat, V5_MAX.get(cat, 1)))
+        return float(bd_c_max.get(cat, v5_max.get(cat, 1)))
 
     # ── 1. 교통 크레딧 분리 (SS → SS + LT) ───────────────────────────────
     # v4 이상은 LT가 이미 독립 카테고리이므로 분리 불필요
@@ -406,10 +442,10 @@ def rule_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationStat
     mapped: dict = {}
 
     if needs_lt_split:
-        # LT: 분리된 교통 크레딧을 v5 LT 만점(16)으로 비율 환산
-        mapped["LT"] = _proportional(transport_awarded, transport_max, V5_MAX["LT"])
+        # LT: 분리된 교통 크레딧을 v5 LT 만점으로 비율 환산
+        mapped["LT"] = _proportional(transport_awarded, transport_max, v5_max.get("LT", 15))
 
-        # SS: 순수 SS(교통 제외)를 v5 SS 만점(10)으로 비율 환산
+        # SS: 순수 SS(교통 제외)를 v5 SS 만점으로 비율 환산
         ss_non_transport_v5_base = {
             "v1.0 pilot": 7,   # 14 - 7 = 7 (교통 제외)
             "v2.0":       7,
@@ -418,69 +454,60 @@ def rule_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationStat
             "v3":         20,
         }.get(version, ss_pure_max)
         actual_ss_max = ss_pure_max if ss_pure_max > 0 else ss_non_transport_v5_base
-        mapped["SS"] = _proportional(ss_pure_awarded, actual_ss_max, V5_MAX["SS"])
+        if "SS" in v5_max:
+            mapped["SS"] = _proportional(ss_pure_awarded, actual_ss_max, v5_max["SS"])
 
     elif version in ("v4", "v4.1", "v5"):
         # v4 이상: LT/SS 이미 분리됨 → 직접 또는 비율 환산
         lt_awarded = float(cats.get("LT", 0))
         lt_max = get_old_max("LT")
-        mapped["LT"] = _proportional(lt_awarded, lt_max, V5_MAX["LT"])
+        mapped["LT"] = _proportional(lt_awarded, lt_max, v5_max.get("LT", 15))
 
         ss_awarded = float(cats.get("SS", 0))
         ss_max = get_old_max("SS")
-        mapped["SS"] = _proportional(ss_awarded, ss_max, V5_MAX["SS"])
+        if "SS" in v5_max:
+            mapped["SS"] = _proportional(ss_awarded, ss_max, v5_max["SS"])
 
     else:
         # unknown 버전 fallback
         mapped["LT"] = 0.0
-        mapped["SS"] = _proportional(float(cats.get("SS", 0)), get_old_max("SS"), V5_MAX["SS"])
+        if "SS" in v5_max:
+            mapped["SS"] = _proportional(float(cats.get("SS", 0)), get_old_max("SS"), v5_max["SS"])
 
     # ── WE ────────────────────────────────────────────────────────────────
-    # v4: 11pt → v5: 12pt (소폭 증가)
-    # v4.1/v5: 12pt → 12pt (동일)
-    # 구버전: 5pt → 12pt (대폭 증가 - 수자원 기준 강화 반영)
-    mapped["WE"] = _proportional(float(cats.get("WE", 0)), get_old_max("WE"), V5_MAX["WE"])
+    mapped["WE"] = _proportional(float(cats.get("WE", 0)), get_old_max("WE"), v5_max.get("WE", 9))
 
     # ── EA ────────────────────────────────────────────────────────────────
-    # v2009/v3: 35pt → v5: 33pt (소폭 감소)
-    # v2.2: 17pt → 33pt (에너지 기준 대폭 강화 반영)
-    # O+M v4: 56pt → 33pt (O+M은 에너지 운영에 더 높은 비중 부여했으나 BD+C v5 기준으로 환산)
-    mapped["EA"] = _proportional(float(cats.get("EA", 0)), get_old_max("EA"), V5_MAX["EA"])
+    mapped["EA"] = _proportional(float(cats.get("EA", 0)), get_old_max("EA"), v5_max.get("EA", 33))
 
     # ── MR ────────────────────────────────────────────────────────────────
-    # v2009/v3: 14pt → 13pt (소폭 감소)
-    # v2.2: 13pt → 13pt (동일 - 비율만 적용)
-    # O+M v4: 8pt → 13pt (O+M은 운영 자재에 낮은 배점 → BD+C 기준으로 상향 환산)
-    mapped["MR"] = _proportional(float(cats.get("MR", 0)), get_old_max("MR"), V5_MAX["MR"])
+    mapped["MR"] = _proportional(float(cats.get("MR", 0)), get_old_max("MR"), v5_max.get("MR", 18))
 
-    # ── IEQ ───────────────────────────────────────────────────────────────
-    # v2009/v3: 15pt → 16pt (소폭 증가)
-    # v2.2: 15pt → 16pt (실내환경 기준 강화)
-    # O+M v4: 17pt → 16pt (O+M이 실내 쾌적성에 약간 더 높은 배점)
-    mapped["IEQ"] = _proportional(float(cats.get("IEQ", 0)), get_old_max("IEQ"), V5_MAX["IEQ"])
-
-    # ── IN (Innovation) ───────────────────────────────────────────────────
-    # v2.2: 5pt → 6pt (소폭 증가)
-    # v2009 이상: 6pt → 6pt (동일)
-    mapped["IN"] = _proportional(float(cats.get("IN", 0)), get_old_max("IN"), V5_MAX["IN"])
-
-    # ── RP (Regional Priority) ────────────────────────────────────────────
-    # v2.2 이전: RP 없음 → 0
-    # v2009 이상: 4pt → 4pt (동일)
-    if version in ("v1.0 pilot", "v2.0", "v2.2"):
-        mapped["RP"] = 0.0   # 해당 버전에 없는 카테고리
-    else:
-        mapped["RP"] = _proportional(float(cats.get("RP", 0)), get_old_max("RP"), V5_MAX["RP"])
+    # ── EQ (Indoor Environmental Quality, 구버전 IEQ에서 코드 변경) ────────
+    # PDF에서는 여전히 "IEQ"로 파싱되므로 cats.get("IEQ", 0) 사용
+    ieq_awarded = float(cats.get("IEQ", cats.get("EQ", 0)))
+    ieq_old_max = cats_possible.get("IEQ", cats_possible.get("EQ", 0))
+    if ieq_old_max <= 0:
+        ieq_old_max = get_old_max("IEQ") or get_old_max("EQ")
+    mapped["EQ"] = _proportional(ieq_awarded, float(ieq_old_max), v5_max.get("EQ", 13))
 
     # ── IP (Integrative Process) ──────────────────────────────────────────
     # v4 이전: IP 없음 → 0
-    # v4 이상: 2pt → 2pt (동일)
+    # v4 이상: 비율 환산
     if version in ("v1.0 pilot", "v2.0", "v2.2", "v2009", "v3"):
-        mapped["IP"] = 0.0   # 해당 버전에 없는 카테고리
+        mapped["IP"] = 0.0
     else:
-        mapped["IP"] = _proportional(float(cats.get("IP", 0)), get_old_max("IP"), V5_MAX["IP"])
+        mapped["IP"] = _proportional(float(cats.get("IP", 0)), get_old_max("IP"), v5_max.get("IP", 1))
+
+    # ── IN, RP: v5에서 폐지 → dropped_categories에 기록, mapped에는 미포함 ──
+    dropped: dict = {}
+    if cats.get("IN", 0) > 0:
+        dropped["IN"] = float(cats["IN"])
+    if cats.get("RP", 0) > 0:
+        dropped["RP"] = float(cats["RP"])
 
     total_v5 = round(sum(mapped.values()), 2)
+    v5_total_max = sum(v5_max.values())
 
     # ── 매핑 근거 문자열 구성 ─────────────────────────────────────────────
     if needs_lt_split:
@@ -491,23 +518,26 @@ def rule_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationStat
     else:
         lt_note = "LT/SS 이미 분리됨 (v4 이상)"
 
+    dropped_note = f" | 폐지카테고리(IN/RP) 제외: {dropped}" if dropped else ""
+
     rationale = (
         f"[Rule Mapper] 버전={version} | {lt_note} | "
-        f"v5 총점={total_v5}/110 | "
+        f"v5 총점={total_v5}/{v5_total_max}{dropped_note} | "
         f"원본 총점={project.get('total_score_raw', '?')}"
     )
 
     rule_mapping_result = {
-        "mapped_categories":  mapped,
-        "mapping_rationale":  rationale,
+        "mapped_categories":   mapped,
+        "mapping_rationale":   rationale,
         "proportional_scores": {
-            cat: f"{cats.get(cat, 0):.1f}/{get_old_max(cat):.0f} → {score:.2f}/{V5_MAX.get(cat, 0)}"
+            cat: f"{cats.get(cat, cats.get('IEQ', 0) if cat == 'EQ' else 0):.1f}/{get_old_max('IEQ' if cat == 'EQ' else cat):.0f} → {score:.2f}/{v5_max.get(cat, 0)}"
             for cat, score in mapped.items()
         },
-        "total_score_v5": total_v5,
+        "total_score_v5":  total_v5,
+        "dropped_categories": dropped,   # IN/RP 원본 점수 기록 (분석용)
     }
 
-    log = f"[Rule Mapper] {version} → v5 매핑 완료: {total_v5:.1f}/110"
+    log = f"[Rule Mapper] {version} → v5 매핑 완료: {total_v5:.1f}/{v5_total_max}"
     return {
         **state,
         "rule_mapping_result": rule_mapping_result,
@@ -559,18 +589,21 @@ def hallucination_checker_node(state: LEEDStandardizationState) -> LEEDStandardi
     mapped = mapping.get("mapped_categories", {})
     total_v5 = mapping.get("total_score_v5", 0.0)
     version = project.get("version", "v4")
+    leed_system = project.get("leed_system", "")
+    v5_max = _get_v5_max(leed_system)
+    v5_total_max = float(sum(v5_max.values()))
     issues = []
 
     # ── 검증 1: 카테고리 점수 범위 ────────────────────────────────────────
     for cat, score in mapped.items():
-        v5_max = V5_MAX.get(cat)
-        if v5_max is None:
+        cat_max = v5_max.get(cat)
+        if cat_max is None:
             issues.append(f"v5에 없는 카테고리: {cat}")
             continue
         if score < 0:
             issues.append(f"{cat} 음수: {score}")
-        if score > v5_max + 0.01:   # 부동소수점 오차 0.01 허용
-            issues.append(f"{cat} 초과: {score:.2f} > max {v5_max}")
+        if score > cat_max + 0.01:   # 부동소수점 오차 0.01 허용
+            issues.append(f"{cat} 초과: {score:.2f} > max {cat_max}")
 
     # ── 검증 2: 총점 일관성 ───────────────────────────────────────────────
     computed_total = sum(mapped.values())
@@ -587,7 +620,7 @@ def hallucination_checker_node(state: LEEDStandardizationState) -> LEEDStandardi
     ratio_orig = raw_total / ver_max_total
 
     # v5 달성률
-    ratio_v5 = total_v5 / 110.0
+    ratio_v5 = total_v5 / v5_total_max
 
     drift = abs(ratio_orig - ratio_v5)
     if drift > RATIO_DRIFT_THRESHOLD:
@@ -674,18 +707,24 @@ def llm_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationState
     }
     guide_text = "\n".join(f"  {k}: {v}" for k, v in version_guides.items())
 
-    system_prompt = """당신은 LEED(Leadership in Energy and Environmental Design) 버전 표준화 전문가입니다.
-구버전 LEED 카테고리 점수를 최신 v5 BD+C 기준으로 정확하게 매핑합니다.
+    # LLM 프롬프트용 v5_max 계산 (leed_system 기반)
+    _llm_v5_max = _get_v5_max(project.get("leed_system", ""))
+    _llm_v5_cats_str = ", ".join(f"{k}={v}" for k, v in _llm_v5_max.items())
+    _llm_v5_total = sum(_llm_v5_max.values())
+    _llm_cats_json = "{" + ", ".join(f'"{k}": <숫자>' for k in _llm_v5_max) + "}"
 
-v5 카테고리 최대점수: LT=16, SS=10, WE=12, EA=33, MR=13, IEQ=16, IN=6, RP=4, IP=2 (합계=110)
+    system_prompt = f"""당신은 LEED(Leadership in Energy and Environmental Design) 버전 표준화 전문가입니다.
+구버전 LEED 카테고리 점수를 최신 v5 기준으로 정확하게 매핑합니다.
+
+v5 카테고리 최대점수: {_llm_v5_cats_str} (합계={_llm_v5_total})
+※ v5에서 IN(Innovation), RP(Regional Priority) 카테고리는 폐지됨. IEQ → EQ로 코드 변경.
 
 반드시 다음 JSON 형식으로만 응답하세요:
-{
-  "mapped_categories": {"LT": <숫자>, "SS": <숫자>, "WE": <숫자>, "EA": <숫자>,
-                        "MR": <숫자>, "IEQ": <숫자>, "IN": <숫자>, "RP": <숫자>, "IP": <숫자>},
+{{
+  "mapped_categories": {_llm_cats_json},
   "mapping_rationale": "<매핑 근거>",
-  "proportional_scores": {}
-}"""
+  "proportional_scores": {{}}
+}}"""
 
     user_prompt = f"""다음 LEED 프로젝트를 v5 기준으로 매핑해주세요.
 
@@ -725,17 +764,19 @@ JSON으로만 응답하세요."""
         mapped_cats = parsed.get("mapped_categories", {})
 
         # LLM 출력도 클램핑 (환각 방지 보정)
-        for cat in mapped_cats:
-            mapped_cats[cat] = _clamp(float(mapped_cats[cat]), V5_MAX.get(cat, 999))
+        _llm_v5_max_clamp = _get_v5_max(project.get("leed_system", ""))
+        for cat in list(mapped_cats.keys()):
+            mapped_cats[cat] = _clamp(float(mapped_cats[cat]), _llm_v5_max_clamp.get(cat, 999))
 
         total_v5 = round(sum(mapped_cats.values()), 2)
+        _v5_total = sum(_llm_v5_max_clamp.values())
         mapping_result = {
             "mapped_categories":  mapped_cats,
             "mapping_rationale":  parsed.get("mapping_rationale", ""),
             "proportional_scores": parsed.get("proportional_scores", {}),
             "total_score_v5":      total_v5,
         }
-        log = f"[LLM Mapper Iter {current_iter+1}] 완료 - v5 총점: {total_v5:.1f}/110"
+        log = f"[LLM Mapper Iter {current_iter+1}] 완료 - v5 총점: {total_v5:.1f}/{_v5_total}"
 
     except Exception as e:
         # LLM 파싱 실패 → rule_mapper 결과 재사용 (최후 수단)
@@ -861,11 +902,12 @@ JSON으로만 응답하세요."""
 
     except Exception as e:
         # 파싱 실패 → 수학적 체크만으로 판정
+        _val_v5_max = _get_v5_max(state.get("project", {}).get("leed_system", ""))
         mapped = mapping.get("mapped_categories", {})
         fallback_issues = [
-            f"{cat} 초과: {s:.2f} > {V5_MAX.get(cat, 0)}"
+            f"{cat} 초과: {s:.2f} > {_val_v5_max.get(cat, 0)}"
             for cat, s in mapped.items()
-            if s > V5_MAX.get(cat, 0) + 0.01
+            if s > _val_v5_max.get(cat, 0) + 0.01
         ]
         is_valid = len(fallback_issues) == 0
         result = {
@@ -913,12 +955,15 @@ def finalize_node(state: LEEDStandardizationState) -> LEEDStandardizationState:
     mapped = mapping.get("mapped_categories", {})
     total_v5 = mapping.get("total_score_v5", sum(mapped.values()))
 
+    _fin_v5_max = _get_v5_max(project.get("leed_system", ""))
+    _fin_v5_total = float(sum(_fin_v5_max.values()))
+
     # 달성률
     ver_max_total = sum(VERSION_BD_C_MAX.get(project.get("version", "v4"),
                                               VERSION_BD_C_MAX["v4"]).values())
     raw_total = float(project.get("total_score_raw", 0))
     ratio_orig = round(raw_total / max(ver_max_total, 1), 4)
-    ratio_v5 = round(total_v5 / 110, 4)
+    ratio_v5 = round(total_v5 / _fin_v5_total, 4)
 
     final_data = {
         # 식별 정보
@@ -944,7 +989,7 @@ def finalize_node(state: LEEDStandardizationState) -> LEEDStandardizationState:
         #
         # 즉 버전이 달라도 "이 카테고리에서 몇 %를 달성했냐"는 값은 동일하게 보존됨.
         # ML 모델에는 이 ratio 필드를 feature로 사용할 것.
-        **{f"ratio_{cat}": round(score / V5_MAX.get(cat, 1), 4)
+        **{f"ratio_{cat}": round(score / _fin_v5_max.get(cat, 1), 4)
            for cat, score in mapped.items()},
         # 카테고리별 v5 절대점수 (논문 방법론 기술용 - ML feature로는 미사용)
         **{f"score_v5_{cat}": score for cat, score in mapped.items()},
