@@ -1,0 +1,10 @@
+﻿,Feature,Mean_Abs_SHAP,Direction_Gold
+1,Energy & Atmosphere (EA),0.87133205,-
+2,Indoor Env. Quality (EQ),0.72341704,-
+3,Water Efficiency (WE),0.6055006,-
+4,Location & Transportation (LT),0.431718,+
+5,LEED Version,0.2739042,+
+6,Sustainable Sites (SS),0.25376543,+
+7,Materials & Resources (MR),0.17514563,-
+8,Floor Area (log sqm),0.14349975,+
+9,Integrative Process (IP),0.0,-

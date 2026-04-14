@@ -42,9 +42,14 @@ def route_after_hallucination_check(state: LEEDStandardizationState) -> str:
 
     PASS → "finalize" (Track 1 완료, LLM 없음)
     FAIL → "llm_mapper" (Track 2 진입, LLM 호출)
+    FAIL + no API key → "finalize" (rule 결과 그대로 사용)
     """
+    import os
     math_result = state.get("math_validation_result", {})
     if math_result.get("passed", False):
+        return "finalize"
+    # OPENAI_API_KEY 없으면 LLM 호출 불가 → rule 결과 그대로 finalize
+    if not os.environ.get("OPENAI_API_KEY"):
         return "finalize"
     return "llm_mapper"
 

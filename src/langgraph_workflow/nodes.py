@@ -15,6 +15,8 @@ LangGraph 노드 정의
 """
 
 import json
+import yaml
+from pathlib import Path
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -25,6 +27,23 @@ from src.data.rubric_loader import load_all_rubrics, get_rubric_max
 # 루브릭 캐시: 모듈 로딩 시 1회 스캔 (data/raw/rubrics/ 아래 xlsx 자동 감지)
 # 파일이 없으면 빈 dict → 기존 hardcoded fallback으로 동작 (에러 없음)
 _RUBRIC_CACHE: dict = load_all_rubrics()
+
+# 매핑 규칙 캐시: data/raw/rubrics/mapping_rules.yaml
+# {source_credit_lower: [rule_dict, ...]} 인덱스로 빠른 부분 문자열 조회
+_MAPPING_RULES: list = []
+_MAPPING_RULES_INDEX: dict = {}
+try:
+    _rules_path = Path("data/raw/rubrics/mapping_rules.yaml")
+    if _rules_path.exists():
+        with open(_rules_path, "r", encoding="utf-8") as _f:
+            _MAPPING_RULES = yaml.safe_load(_f) or []
+        for _rule in _MAPPING_RULES:
+            _key = _rule.get("source_credit", "").lower()
+            if _key:
+                _MAPPING_RULES_INDEX.setdefault(_key, []).append(_rule)
+        print(f"[MappingRules] {len(_MAPPING_RULES)}개 규칙 로딩 완료")
+except Exception as _e:
+    print(f"[MappingRules] 로딩 실패: {_e}")
 
 
 # =============================================================================
@@ -201,6 +220,46 @@ def _proportional(awarded: float, old_max: float, new_max: float) -> float:
 def _clamp(value: float, max_val: float) -> float:
     """값을 [0, max_val] 범위로 클램핑"""
     return round(max(0.0, min(value, max_val)), 2)
+
+
+def _lookup_credit_rule(credit_name: str, version: str) -> dict | None:
+    """
+    개별 크레딧명으로 mapping_rules.yaml에서 v5 매핑 규칙 조회.
+
+    매칭 방식: source_credit을 소문자로 변환 후 부분 문자열 매칭.
+    여러 규칙 매칭 시 가장 긴 source_credit 우선 (specificity).
+    버전 필터: rule의 source_versions에 현재 version이 포함된 것만.
+
+    Args:
+        credit_name: PDF 크레딧명 (예: "Credit: Optimize Energy Performance 18pt")
+        version: 원본 LEED 버전 (예: "v4")
+
+    Returns:
+        dict: 매칭된 규칙 또는 None
+    """
+    if not credit_name or not _MAPPING_RULES_INDEX:
+        return None
+
+    # 전처리: 소문자, 접두사 제거, 점수 표기 제거
+    name_lower = credit_name.lower()
+    for prefix in ("credit:", "prerequisite:", "prereq:", "requirement:", "leed ap:"):
+        if name_lower.startswith(prefix):
+            name_lower = name_lower[len(prefix):].strip()
+
+    best_rule: dict | None = None
+    best_len = 0
+
+    for rule_key, rules in _MAPPING_RULES_INDEX.items():
+        if rule_key in name_lower:
+            for rule in rules:
+                rule_versions = [str(v).lower() for v in rule.get("source_versions", [])]
+                if rule_versions and version.lower() not in rule_versions:
+                    continue
+                if len(rule_key) > best_len:
+                    best_len = len(rule_key)
+                    best_rule = rule
+
+    return best_rule
 
 
 def get_llm(model: str = "gpt-4.1", temperature: float = 0.1) -> ChatOpenAI:
@@ -509,6 +568,41 @@ def rule_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationStat
     total_v5 = round(sum(mapped.values()), 2)
     v5_total_max = sum(v5_max.values())
 
+    # ── 크레딧 레벨 규칙 매핑 (mapping_rules.yaml 조회) ──────────────────
+    credit_mappings: list = []
+    rule_hits = 0
+    rule_misses = 0
+
+    for credit_name, scores in credits.items():
+        rule = _lookup_credit_rule(credit_name, version)
+        if rule:
+            rule_hits += 1
+            credit_mappings.append({
+                "credit_name":  credit_name,
+                "awarded":      scores.get("awarded", 0),
+                "possible":     scores.get("possible", 0),
+                "v5_code":      rule.get("target_v5_code"),
+                "v5_name":      rule.get("target_v5_name"),
+                "v5_category":  rule.get("target_v5_category"),
+                "confidence":   rule.get("confidence", "medium"),
+                "matched":      True,
+            })
+        else:
+            rule_misses += 1
+            credit_mappings.append({
+                "credit_name":  credit_name,
+                "awarded":      scores.get("awarded", 0),
+                "possible":     scores.get("possible", 0),
+                "v5_code":      "UNKNOWN",
+                "v5_name":      None,
+                "v5_category":  None,
+                "confidence":   None,
+                "matched":      False,
+            })
+
+    total_credits = rule_hits + rule_misses
+    hit_rate = (rule_hits / total_credits) if total_credits > 0 else 0.0
+
     # ── 매핑 근거 문자열 구성 ─────────────────────────────────────────────
     if needs_lt_split:
         lt_note = (
@@ -533,11 +627,18 @@ def rule_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationStat
             cat: f"{cats.get(cat, cats.get('IEQ', 0) if cat == 'EQ' else 0):.1f}/{get_old_max('IEQ' if cat == 'EQ' else cat):.0f} → {score:.2f}/{v5_max.get(cat, 0)}"
             for cat, score in mapped.items()
         },
-        "total_score_v5":  total_v5,
-        "dropped_categories": dropped,   # IN/RP 원본 점수 기록 (분석용)
+        "total_score_v5":      total_v5,
+        "dropped_categories":  dropped,       # IN/RP 원본 점수 기록 (분석용)
+        "credit_mappings":     credit_mappings,   # 크레딧 레벨 규칙 매핑 결과
+        "credit_rule_hits":    rule_hits,
+        "credit_rule_misses":  rule_misses,
+        "credit_rule_hit_rate": round(hit_rate, 4),
     }
 
-    log = f"[Rule Mapper] {version} → v5 매핑 완료: {total_v5:.1f}/{v5_total_max}"
+    log = (
+        f"[Rule Mapper] {version} → v5 매핑 완료: {total_v5:.1f}/{v5_total_max} | "
+        f"크레딧 규칙 히트: {rule_hits}/{total_credits} ({hit_rate:.0%})"
+    )
     return {
         **state,
         "rule_mapping_result": rule_mapping_result,
@@ -677,6 +778,21 @@ def llm_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationState
         - 이전 validator 피드백 포함 (반복 시)
         - JSON only 응답 강제
     """
+    # OPENAI_API_KEY 없으면 LLM 호출 불가 → rule_mapper 결과로 graceful fallback
+    import os as _os
+    if not _os.environ.get("OPENAI_API_KEY"):
+        rule_result = state.get("rule_mapping_result", {})
+        log = (
+            "[LLM Mapper] OPENAI_API_KEY 없음 - rule_mapper 결과로 fallback (LLM 호출 생략). "
+            f"이슈: {state.get('math_validation_result', {}).get('issues', [])}"
+        )
+        return {
+            **state,
+            "mapping_result":   rule_result,   # rule 결과를 그대로 사용
+            "validation_mode":  "rule",         # rule 경로로 마킹
+            "logs":             [log],
+        }
+
     llm = get_llm()
     project = state.get("project", {})
     version = project.get("version", "unknown")
