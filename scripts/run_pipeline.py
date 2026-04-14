@@ -17,6 +17,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# .env 파일에서 OPENAI_API_KEY 등 환경변수 로드
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import pandas as pd
 from src.langgraph_workflow.graph import run_standardization
 from src.data.loader import LEEDDataLoader

@@ -1,16 +1,16 @@
 {
-  "cv_accuracy_mean": 0.8239,
-  "cv_accuracy_std": 0.016,
+  "cv_accuracy_mean": 0.8165,
+  "cv_accuracy_std": 0.0253,
   "cv_scores": [
-    0.7935,
-    0.837,
-    0.837,
-    0.8261,
-    0.8261
+    0.8235,
+    0.8353,
+    0.8471,
+    0.8,
+    0.7765
   ],
   "train_accuracy": 1.0,
   "weighted_f1": 1.0,
-  "n_samples": 460,
+  "n_samples": 425,
   "n_features": 9,
   "model": "XGBoost",
   "params": {

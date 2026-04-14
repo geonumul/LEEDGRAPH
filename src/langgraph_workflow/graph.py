@@ -19,6 +19,13 @@ LangGraph 그래프 구성
     - Track 2는 구버전(v2.2, v2009 등) SS→LT 분리 추정 오류나 unknown 버전에만 진입
 """
 
+# .env 파일에서 환경변수 로드 (OPENAI_API_KEY 등)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from langgraph.graph import StateGraph, END
 from .state import LEEDStandardizationState
 from .nodes import (

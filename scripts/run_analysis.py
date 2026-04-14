@@ -16,6 +16,12 @@ import json
 import warnings
 warnings.filterwarnings("ignore")
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import matplotlib
 matplotlib.use("Agg")   # 헤드리스 환경 - 화면 출력 없음
 import matplotlib.pyplot as plt
