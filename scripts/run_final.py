@@ -288,7 +288,7 @@ def make_tables(feat: pd.DataFrame, metrics: dict, shap_values, X: pd.DataFrame)
     t2 = pd.DataFrame([
         {"Model": "XGBoost", "CV Accuracy (mean)": metrics["cv_accuracy_mean"],
          "CV Accuracy (std)": metrics["cv_accuracy_std"],
-         "Weighted F1": metrics["weighted_f1"],
+         "Weighted F1": metrics.get("cv_f1_weighted_mean", metrics.get("weighted_f1", metrics.get("train_weighted_f1", 0))),
          "n_features": metrics["n_features"], "n_samples": metrics["n_samples"]},
     ])
     t2.to_csv(FINAL_DIR / "Table2_model_performance.csv", index=False, encoding="utf-8-sig")
@@ -325,7 +325,7 @@ def write_paper_draft(feat: pd.DataFrame, metrics: dict, imp_df: pd.DataFrame):
     top3 = imp_df.iloc[2]["Feature"]
     cv_acc = metrics["cv_accuracy_mean"]
     cv_std = metrics["cv_accuracy_std"]
-    f1 = metrics["weighted_f1"]
+    f1 = metrics.get("cv_f1_weighted_mean", metrics.get("weighted_f1", metrics.get("train_weighted_f1", 0)))
     n = metrics["n_samples"]
 
     grade_dist = feat["certification_level"].value_counts().reindex(GRADE_ORDER, fill_value=0)
@@ -461,7 +461,7 @@ See `outputs/final/Figure1_pipeline.png` for the full diagram.
 | Metric | Value |
 |--------|-------|
 | CV Accuracy | **{cv_acc:.4f} ± {metrics['cv_accuracy_std']:.4f}** |
-| Weighted F1 | {metrics['weighted_f1']:.4f} (train) |
+| CV Weighted F1 | **{metrics.get('cv_f1_weighted_mean', metrics.get('train_weighted_f1', 0)):.4f} ± {metrics.get('cv_f1_weighted_std', 0):.4f}** |
 | Features | {metrics['n_features']} (ratio_EA/LT/MR/EQ/WE/SS/IP + log_area + version) |
 
 ### SHAP Top-5 Grade Determinants
@@ -550,7 +550,7 @@ def main():
     print("Loading data & retraining model...")
     feat, X, y, model, explainer, shap_values, feature_cols = load_all()
 
-    with open("outputs/phase_D/model_metrics.json", "r") as f:
+    with open("outputs/phase_D/model_metrics.json", "r", encoding="utf-8") as f:
         metrics = json.load(f)
 
     print("\n[Figure 1] Pipeline diagram...")

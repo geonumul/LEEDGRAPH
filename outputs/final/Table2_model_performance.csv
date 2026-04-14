@@ -1,2 +1,2 @@
 ﻿Model,CV Accuracy (mean),CV Accuracy (std),Weighted F1,n_features,n_samples
-XGBoost,0.8165,0.0253,1.0,9,425
+XGBoost,0.8174,0.0502,0.8157,9,460

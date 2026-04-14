@@ -6,11 +6,11 @@
 
 ## 1. Research Overview
 
-This project analyzes 425 Korean LEED-certified buildings spanning LEED versions v2.0–v4.1. The core contributions are:
+This project analyzes 460 Korean LEED-certified buildings spanning LEED versions v2.0–v4.1. The core contributions are:
 1. **Version harmonization**: Proportional-scaling rules (107 rule-based mappings) to unify all versions under the LEED v5 schema.
 2. **Grade factor analysis**: XGBoost + SHAP TreeExplainer to identify which categories most influence certification grade.
 
-Key finding: **Energy & Atmosphere (EA)** is the dominant grade determinant (mean |SHAP|=0.8180), followed by **Indoor Env. Quality (EQ)** and **Water Efficiency (WE)**.
+Key finding: **Energy & Atmosphere (EA)** is the dominant grade determinant (mean |SHAP|=0.8840), followed by **Indoor Env. Quality (EQ)** and **Water Efficiency (WE)**.
 
 ---
 
@@ -20,7 +20,7 @@ Key finding: **Energy & Atmosphere (EA)** is the dominant grade determinant (mea
 |------|-----------------|-----------|
 | Version coverage | Single version | v2.0 / v2.2 / v2009 / v4 / v4.1 |
 | Standardization | Manual / none | Rule-based proportional scaling to v5 |
-| Sample size | < 100 (typical) | **425 Korean buildings** |
+| Sample size | < 100 (typical) | **460 Korean buildings** |
 | XAI method | Feature importance | SHAP TreeExplainer (credit-level) |
 | Focus | Global benchmarks | Korean building stock |
 
@@ -48,7 +48,7 @@ See `outputs/final/Figure1_pipeline.png` for the full diagram.
 | Building directory | PublicLEEDProjectDirectory.csv (456 rows) |
 | LEED versions | v2.0, v2.2, v2009 (v3), v4, v4.1 |
 | Post-standardization | v5 schema, 9,747 credit records, 7 categories |
-| Grade distribution | Gold 204 (48%) / Silver 117 (28%) / Platinum 53 (12%) / Certified 51 (12%) |
+| Grade distribution | Gold 235 (51%) / Silver 118 (26%) / Platinum 56 (12%) / Certified 51 (11%) |
 
 ---
 
@@ -58,19 +58,19 @@ See `outputs/final/Figure1_pipeline.png` for the full diagram.
 
 | Metric | Value |
 |--------|-------|
-| CV Accuracy | **0.8165 ± 0.0253** |
-| Weighted F1 | 1.0000 (train) |
+| CV Accuracy | **0.8174 ± 0.0502** |
+| CV Weighted F1 | **0.8157 ± 0.0504** |
 | Features | 9 (ratio_EA/LT/MR/EQ/WE/SS/IP + log_area + version) |
 
 ### SHAP Top-5 Grade Determinants
 
 | Rank | Category | Mean |SHAP| |
 |------|----------|------------|
-| 2 | Energy & Atmosphere (EA) | 0.8180 |
-| 3 | Indoor Env. Quality (EQ) | 0.7170 |
-| 4 | Water Efficiency (WE) | 0.5997 |
-| 5 | Location & Transportation (LT) | 0.4363 |
-| 6 | Sustainable Sites (SS) | 0.2569 |
+| 2 | Energy & Atmosphere (EA) | 0.8840 |
+| 3 | Indoor Env. Quality (EQ) | 0.6533 |
+| 4 | Water Efficiency (WE) | 0.5895 |
+| 5 | Location & Transportation (LT) | 0.4377 |
+| 6 | LEED Version | 0.2880 |
 
 ---
 
