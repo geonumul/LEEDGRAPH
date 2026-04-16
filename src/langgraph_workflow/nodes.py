@@ -818,21 +818,22 @@ def hallucination_checker_node(state: LEEDStandardizationState) -> LEEDStandardi
 
 def llm_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationState:
     """
-    [LLM Mapper Node] - 토큰 소모 있음 (폴백 전용)
+    [LLM Mapper Node] - 토큰 소모 있음 (V2: rule 거부 시에도 진입)
 
-    역할: hallucination_checker 실패 시에만 진입.
-          rule_mapper가 처리하지 못한 엣지케이스(unknown 버전, 비정형 PDF 등)를
-          LLM에게 매핑 요청.
+    V2 진입 경로:
+        (1) hallucination_checker FAIL → rule 계산 자체가 이상 → LLM 재매핑
+        (2) llm_validator(target=rule) FAIL → LLM이 rule 결과 거부 → LLM 재매핑
+        (3) llm_validator(target=llm)  FAIL → 이전 LLM 재매핑 결과 거부 → 재매핑 loop
 
-    입력:
-        - project (rule_mapper가 구성한 project 필드)
-        - math_validation_result (왜 rule_mapper가 실패했는지 - LLM에게 컨텍스트 제공)
-        - validation_result (이전 llm_validator의 피드백 - 있으면 재매핑에 반영)
+    역할:
+        - rule_mapping_result와 이전 LLM feedback을 모두 context로 활용
+        - LLM이 독립적으로 재매핑한 결과를 mapping_result에 저장
+        - validation_target을 "llm"으로 전환 (다음 llm_validator는 LLM 결과 검증)
+        - validation_mode를 "llm"으로 마킹 (최종 채택 결과 = mapping_result)
 
     LLM 프롬프트 전략:
-        - rule_mapper의 실패 사유를 명시적으로 전달
+        - rule_mapper의 출력 + math_validation 이슈 + validator feedback 모두 전달
         - 버전별 매핑 가이드 텍스트 포함
-        - 이전 validator 피드백 포함 (반복 시)
         - JSON only 응답 강제
     """
     # OPENAI_API_KEY 없으면 LLM 호출 불가 → rule_mapper 결과로 graceful fallback
@@ -845,15 +846,17 @@ def llm_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationState
         )
         return {
             **state,
-            "mapping_result":   rule_result,   # rule 결과를 그대로 사용
-            "validation_mode":  "rule",         # rule 경로로 마킹
-            "logs":             [log],
+            "mapping_result":    rule_result,   # rule 결과를 그대로 사용
+            "validation_mode":   "rule",        # rule 경로로 마킹
+            "validation_target": "rule",        # 검증 대상 그대로 유지
+            "logs":              [log],
         }
 
     llm = get_llm()
     project = state.get("project", {})
     version = project.get("version", "unknown")
     current_iter = state.get("current_iteration", 0)
+    prev_target = state.get("validation_target", "rule")
 
     # ── 실패 사유 수집 ────────────────────────────────────────────────────
     math_result = state.get("math_validation_result", {})
@@ -864,6 +867,19 @@ def llm_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationState
     prev_validation = state.get("validation_result")
     if prev_validation and not prev_validation.get("is_valid", True):
         prev_feedback = f"\n\n[이전 검증 실패 피드백]\n{prev_validation.get('feedback', '')}"
+
+    # V2: rule 결과가 LLM 검증에서 거부됐을 때 rule 매핑을 context로 포함
+    rule_context = ""
+    if prev_target == "rule":
+        rule_result = state.get("rule_mapping_result", {})
+        if rule_result:
+            rule_context = (
+                f"\n\n[참고] 결정론적 Rule 매핑 결과 (LLM이 거부함):\n"
+                f"  카테고리: {json.dumps(rule_result.get('mapped_categories', {}), ensure_ascii=False)}\n"
+                f"  v5 총점: {rule_result.get('total_score_v5', '?')}\n"
+                f"  근거: {rule_result.get('mapping_rationale', '')}\n"
+                f"이 Rule 결과를 참고하되, 검증 피드백을 반영하여 독립적으로 재매핑하세요."
+            )
 
     # ── 버전 매핑 가이드 ──────────────────────────────────────────────────
     version_guides = {
@@ -918,7 +934,7 @@ v5 카테고리 최대점수: {_llm_v5_cats_str} (합계={_llm_v5_total})
 1. 각 카테고리 점수가 v5 최대값을 초과하지 않도록 할 것
 2. 원본 버전에 없는 카테고리(예: v2.2의 LT, RP, IP)는 0으로 설정
 3. 달성률(획득/최대)을 최대한 보존할 것
-{prev_feedback}
+{rule_context}{prev_feedback}
 JSON으로만 응답하세요."""
 
     try:
@@ -966,38 +982,42 @@ JSON으로만 응답하세요."""
         **state,
         "mapping_result":    mapping_result,
         "validation_mode":   "llm",
+        "validation_target": "llm",     # V2: 다음 validator는 LLM 결과 검증
         "current_iteration": current_iter + 1,
         "logs":              [log],
     }
 
 
 # =============================================================================
-# Node 6: LLM Validator (LLM 경로 전용 검증 - 토큰 소모 있음)
+# Node 6: LLM Validator (V2: rule / llm 두 대상 모두 검증)
 # =============================================================================
 
 def llm_validator_node(state: LEEDStandardizationState) -> LEEDStandardizationState:
     """
-    [LLM Validator Node] - 토큰 소모 있음 (LLM 경로 전용)
+    [LLM Validator Node] - 토큰 소모 있음 (V2: rule / llm 두 대상 검증)
 
-    역할: llm_mapper 결과의 건축 환경적 타당성 검증.
-          수학적 체크(hallucination_checker)보다 전문적 판단 포함.
-
-    검증 기준:
-        1. 수학적 제약 (카테고리 초과, 음수) - 재확인
-        2. 원본 등급과 v5 환산 총점의 일관성
-           (Certified: 40~49, Silver: 50~59, Gold: 60~79, Platinum: 80+)
-        3. 달성률 드리프트 (origin vs v5)
-        4. 비존재 카테고리에 점수 부여 여부
+    V2 변경:
+        - validation_target == "rule" → rule_mapping_result 검증 (의미적 타당성)
+        - validation_target == "llm"  → mapping_result 검증 (할루시네이션·수치)
+        - 두 경우 프롬프트가 분기됨
 
     [validation_score >= 0.8] → is_valid=True → finalize
-    [validation_score < 0.8 & iter < LLM_MAX_ITERATIONS] → 재매핑 (llm_mapper)
-    [iter >= LLM_MAX_ITERATIONS] → 강제 통과 (무한 루프 방지)
+    [validation_score <  0.8 & iter < max] → llm_mapper 재매핑
+    [iter >= max] → 강제 통과 (무한 루프 방지)
     """
     llm = get_llm()
     project = state.get("project", {})
-    mapping = state.get("mapping_result", {})
     current_iter = state.get("current_iteration", 0)
     max_iter = state.get("max_iterations", LLM_MAX_ITERATIONS)
+    target = state.get("validation_target", "rule")  # V2
+
+    # V2: 검증 대상 선택
+    if target == "rule":
+        mapping = state.get("rule_mapping_result", {})
+        target_label = "Rule 기반 결정론적 매핑 결과"
+    else:
+        mapping = state.get("mapping_result", {})
+        target_label = "LLM 재매핑 결과"
 
     # 최대 반복 초과 시 강제 통과
     if current_iter >= max_iter:
@@ -1007,6 +1027,7 @@ def llm_validator_node(state: LEEDStandardizationState) -> LEEDStandardizationSt
             "issues": ["최대 반복 도달 - 강제 승인"],
             "feedback": "",
             "iteration": current_iter,
+            "target": target,
         }
         return {
             **state,
@@ -1014,8 +1035,63 @@ def llm_validator_node(state: LEEDStandardizationState) -> LEEDStandardizationSt
             "logs": [f"[LLM Validator] 최대 반복({max_iter}) 도달 - 강제 승인"],
         }
 
-    system_prompt = """당신은 LEED 인증 심사 전문가입니다.
-제시된 버전 매핑 결과의 건축 환경적 타당성을 검증하세요.
+    # ══════════════════════════════════════════════════════════════════════
+    # Rule 검증 프롬프트 (V2 신규) — 의미적 타당성에 초점
+    # ══════════════════════════════════════════════════════════════════════
+    if target == "rule":
+        system_prompt = """당신은 LEED 인증 심사 전문가입니다.
+아래는 결정론적 규칙으로 계산된 v5 매핑 결과입니다. 수치는 수학적 제약을 이미 통과했습니다.
+당신의 역할은 이 매핑이 **의미적으로** 타당한지 점검하는 것입니다.
+
+[중점 검증 관점]
+1. LEED 버전 특성이 올바르게 반영되었는지
+   - v2.2 / v2009: SS 카테고리에 교통 크레딧이 포함됨 → LT 분리가 합리적인지
+   - v4 / v4.1: LT/SS 이미 분리되어 있음 → 그대로 유지됐는지
+2. 크레딧이 체계적으로 누락되지 않았는지 (e.g., EA 상세 크레딧 대신 카테고리 합계로 처리됐는지)
+3. v5 신규 카테고리(IP, Integrative Process)의 배분이 건물 특성에 적절한지
+4. 원본 건물 맥락(인증등급, 건물 유형, 연면적)과 v5 환산 점수가 상식적으로 일치하는지
+5. 원본 버전에 없는 카테고리(v2.2→LT/RP/IP, v2009→IP)에 점수가 잘못 부여되지 않았는지
+
+[합격 기준]
+- validation_score >= 0.8 → is_valid=true (Rule 결과 채택)
+- validation_score <  0.8 → is_valid=false (LLM 재매핑 요청)
+- Rule이 수학적으로 맞아도 의미가 틀리면 is_valid=false로 판정하세요.
+
+반드시 JSON 형식으로만 응답하세요:
+{
+  "is_valid": true/false,
+  "validation_score": 0.0~1.0,
+  "issues": ["의미적 문제점1", "의미적 문제점2"],
+  "feedback": "LLM Mapper에게 전달할 재매핑 지시 (버전 특성·누락 크레딧 명시)"
+}"""
+
+        user_prompt = f"""다음 Rule 매핑 결과를 의미적으로 검증하세요.
+
+[원본]
+버전: {project.get('version', '?')}
+인증등급: {project.get('certification_level', '?')}
+건물유형: {project.get('building_type', '?')}
+연면적: {project.get('gross_area_sqm', '?')} sqm
+원본 총점: {project.get('total_score_raw', '?')}
+원본 카테고리 점수: {json.dumps(project.get('categories', {}), ensure_ascii=False)}
+원본 카테고리 만점: {json.dumps(project.get('categories_possible', {}), ensure_ascii=False)}
+
+[{target_label}]
+v5 총점: {mapping.get('total_score_v5', '?')}
+카테고리별: {json.dumps(mapping.get('mapped_categories', {}), ensure_ascii=False)}
+근거: {mapping.get('mapping_rationale', '')}
+크레딧 매핑 성공률: {mapping.get('credit_rule_hit_rate', 'N/A')}
+
+위 매핑이 건물 특성과 LEED 버전 전환 원칙에 **의미적으로** 부합하는지 판단하세요.
+수학적 오류가 아니라 **의미적 부적절함**을 찾으세요.
+JSON으로만 응답하세요."""
+
+    # ══════════════════════════════════════════════════════════════════════
+    # LLM 검증 프롬프트 (기존) — 할루시네이션·수치 오류에 초점
+    # ══════════════════════════════════════════════════════════════════════
+    else:
+        system_prompt = """당신은 LEED 인증 심사 전문가입니다.
+아래는 LLM이 재매핑한 v5 결과입니다. LLM 출력의 할루시네이션과 수치 오류를 점검하세요.
 
 반드시 JSON 형식으로만 응답하세요:
 {
@@ -1025,7 +1101,7 @@ def llm_validator_node(state: LEEDStandardizationState) -> LEEDStandardizationSt
   "feedback": "LLM Mapper에게 전달할 개선 지시"
 }"""
 
-    user_prompt = f"""다음 LEED 버전 매핑 결과를 검증하세요.
+        user_prompt = f"""다음 LLM 재매핑 결과를 검증하세요.
 
 [원본]
 버전: {project.get('version', '?')}
@@ -1033,7 +1109,7 @@ def llm_validator_node(state: LEEDStandardizationState) -> LEEDStandardizationSt
 원본 총점: {project.get('total_score_raw', '?')}
 원본 카테고리: {json.dumps(project.get('categories', {}), ensure_ascii=False)}
 
-[v5 매핑 결과]
+[{target_label}]
 v5 총점: {mapping.get('total_score_v5', '?')}
 카테고리별: {json.dumps(mapping.get('mapped_categories', {}), ensure_ascii=False)}
 근거: {mapping.get('mapping_rationale', '')}
@@ -1081,10 +1157,11 @@ JSON으로만 응답하세요."""
             "issues":           parsed_resp.get("issues", []),
             "feedback":         parsed_resp.get("feedback", ""),
             "iteration":        current_iter,
+            "target":           target,     # V2: 어느 대상을 검증했는지
         }
         status_str = "PASS" if result["is_valid"] else "FAIL"
         log = (
-            f"[LLM Validator Iter {current_iter}] {status_str} "
+            f"[LLM Validator - {target} 경로 Iter {current_iter}] {status_str} "
             f"(score={result['validation_score']:.2f})"
         )
 
@@ -1132,10 +1209,13 @@ def finalize_node(state: LEEDStandardizationState) -> LEEDStandardizationState:
         - 달성률 정보
     """
     project = state.get("project", {})
-    mode = state.get("validation_mode", "rule")
+    # V2: validation_target 기준으로 최종 결과 선택
+    # - target="rule" (llm_validator가 rule 결과 PASS) → rule_mapping_result 채택
+    # - target="llm"  (LLM 재매핑 완료 또는 진행 중)   → mapping_result 채택
+    target = state.get("validation_target", "rule")
+    mode = "rule" if target == "rule" else "llm"
 
-    # 경로에 따라 최종 매핑 결과 선택
-    if mode == "rule":
+    if target == "rule":
         mapping = state.get("rule_mapping_result", {})
     else:
         mapping = state.get("mapping_result", state.get("rule_mapping_result", {}))

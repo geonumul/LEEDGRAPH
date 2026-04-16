@@ -179,7 +179,257 @@ return "llm_mapper"          # ← 수학 검증 실패한 10%만 LLM 진입
 이 Phase에서는 코드 수정을 하지 않았으므로 실행 검증 없음.  
 Phase 2 이후 컴파일 테스트, Phase 4 단일 샘플 실행으로 단계적 검증 예정.
 
+---
+
+## Phase 2 — LLM Validator 의무 호출 라우팅 리팩토링 (2026-04-17)
+
+### 변경 파일
+- `src/langgraph_workflow/state.py` (LEEDStandardizationState)
+- `src/langgraph_workflow/graph.py` (route 함수 2개, build_standardization_graph, initial_state)
+- `src/langgraph_workflow/nodes.py` (llm_mapper_node: rule context 추가, validation_target 전환, finalize_node: target 기반 결과 선택)
+
+### Before → After (핵심 변경)
+
+**Before**: `route_after_hallucination_check` → `math passed` 시 `return "finalize"` (LLM 완전 스킵)
+```python
+if math_result.get("passed", False):
+    return "finalize"
+```
+
+**After**: `math passed` 시 `return "llm_validator"` (LLM 의무 검증)
+```python
+if not os.environ.get("OPENAI_API_KEY"):
+    return "finalize"          # graceful degradation
+if math_result.get("passed", False):
+    return "llm_validator"     # V2 신규: rule 결과도 LLM 검증
+return "llm_mapper"
+```
+
+**build_standardization_graph 엣지 딕셔너리**: `{"finalize", "llm_mapper"}` → `{"finalize", "llm_validator", "llm_mapper"}` (3-way 분기)
+
+**state.py**: `validation_target: str` 필드 추가 (`"rule"` | `"llm"`), 초기값 `"rule"`.
+`validation_mode`와 역할 분리:
+- `validation_mode`: 최종 finalize에서 어느 결과를 채택할지
+- `validation_target`: 현재 llm_validator가 검증 중인 대상
+
+**llm_mapper_node**: 
+- 진입 시 `validation_target == "rule"`이면 `rule_mapping_result`를 context로 포함
+- 출력에 `validation_target="llm"`, `validation_mode="llm"` 설정
+
+**finalize_node**: `validation_mode` → `validation_target` 기준으로 결과 선택
+
+### 설계 근거
+
+- **Option A (LLM 판단 존중) 채택**: LLM이 rule 결과를 FAIL 판정 시 곧바로 LLM 재매핑. rule이 수학적으로 맞아도 의미가 틀릴 수 있다는 전제.
+- **rule_mapper는 그대로 유지**: 계산=rule / 검증=LLM 역할 분리 유지.
+- **Target 전환은 node 내부에서**: conditional edge는 state를 수정할 수 없으므로 `llm_mapper_node`가 자신의 출력 state에 `validation_target="llm"` 설정.
+
+### 검증 방법
+
+```bash
+python -c "from src.langgraph_workflow.graph import build_standardization_graph; build_standardization_graph()"
+# → "Graph compiled OK" 출력됨
+# → 노드 7개: __start__, pdf_ingest, csv_match, rule_mapper, hallucination_checker, llm_mapper, llm_validator, finalize
+```
+
 ### 알려진 제한사항
+
+- Phase 4/5에서 확인 필요: LLM이 rule 결과를 **너무 자주 거부**하면 LLM loop 반복 → 최종 drift 악화 가능.
+
+---
+
+## Phase 3 — LLM Validator 프롬프트 분기 (2026-04-17)
+
+### 변경 파일
+- `src/langgraph_workflow/nodes.py` (llm_validator_node)
+
+### Before → After
+
+**Before**: 단일 프롬프트 — LLM 출력 할루시네이션·수치 오류 점검 중심.
+
+**After**: `validation_target`에 따라 두 프롬프트 분기:
+
+#### Rule 검증 프롬프트 (target="rule", 신규)
+- 역할: "결정론적 규칙으로 계산된 결과의 **의미적** 타당성 검증"
+- 중점 검증:
+  1. LEED 버전 특성 반영 (v2.2 SS→LT 교통 분리 등)
+  2. 크레딧 누락 여부
+  3. v5 신규 카테고리(IP) 배분 적절성
+  4. 원본 건물 맥락과 v5 환산 점수의 상식적 일치
+  5. 원본 버전에 없는 카테고리에 점수 오배정 여부
+- 합격 기준: score >= 0.8 → is_valid=true
+
+#### LLM 검증 프롬프트 (target="llm", 기존)
+- 역할: "LLM 출력의 할루시네이션·수치 오류 점검"
+- 중점 검증: 카테고리 최대값 초과, 등급 일관성, drift 20%, 비존재 카테고리
+
+**공통 응답 스키마**: `{"is_valid", "validation_score", "issues", "feedback"}` + `target` 필드 추가.
+
+**로그 메시지**: `[LLM Validator - rule 경로 Iter N]` vs `[LLM Validator - llm 경로 Iter N]` 구분.
+
+### 설계 근거
+
+- Rule 결과는 수학은 이미 통과 → 의미적 관점에 집중 (수학적 재체크 불필요, 토큰 절약).
+- LLM 결과는 할루시네이션 가능 → 수치 중심 체크 유지.
+- 두 프롬프트가 다른 Failure mode를 다루므로 분리 효과적.
+
+### 검증 방법
+
+Phase 4 단일 PDF 테스트 로그 일부:
+```
+[LLM Validator - rule 경로 Iter 0] FAIL (score=0.70)
+[LLM Mapper Iter 1] 완료 - v5 총점: 50.0/100
+[LLM Validator - llm 경로 Iter 1] FAIL (score=0.50)
+```
+두 경로 구분 로그 정상 출력됨.
+
+### 알려진 제한사항
+
+- Rule 검증 프롬프트가 **너무 엄격**: Phase 4에서 88% hit rate의 rule 결과도 FAIL 판정. Phase 5 통계로 합격 기준(0.8) 재조정 여지 확인 필요.
+
+---
+
+## Phase 4 — 단일 PDF 신규 파이프라인 검증 (2026-04-17)
+
+### 변경 파일
+- `test_rule_llm_validation.py` (신규, 프로젝트 루트)
+
+### 테스트 대상
+
+- PDF: `Scorecard_adidasBrandFlagshipSeoul_230501.pdf` (v4, Gold)
+- 원본 총점: 69/110
+
+### 실행 결과
+
+**노드 방문 순서** (V2 정상 작동 확인):
+```
+PDF Ingest → CSV Match → Rule Mapper (v5=48.3, hit_rate=88%)
+→ Hallucination Check PASS (drift=13.8%)
+→ LLM Validator [target=rule, Iter 0] FAIL (score=0.70)     ← V2 핵심
+→ LLM Mapper Iter 1 (v5=50.0)
+→ LLM Validator [target=llm, Iter 1] FAIL (score=0.50)
+→ LLM Mapper Iter 2 (v5=45.0)
+→ LLM Validator [target=llm, Iter 2] FAIL (score=0.60)
+→ LLM Mapper Iter 3 (v5=37.0)
+→ LLM Validator 최대 반복(3) 도달 - 강제 승인
+→ Finalize (llm 경로)
+```
+
+**주요 확인 사항**:
+| 항목 | 결과 |
+|------|------|
+| hallucination PASS 후 llm_validator 진입 | ✅ 정상 |
+| validation_target="rule" 초기 세팅 | ✅ 정상 |
+| LLM rule 거부 → llm_mapper 전환 | ✅ 정상 |
+| validation_target="llm"로 전환 | ✅ 정상 |
+| 최대 반복 도달 시 강제 승인 | ✅ 정상 |
+| 최종 standardization_track="llm" | ✅ 정상 |
+
+### 관찰된 문제
+
+- **LLM 검증이 너무 엄격**: Rule 결과(drift 13.8%, hit rate 88%)가 건강한 상태였음에도 LLM이 score=0.70으로 FAIL 판정 → 재매핑 반복 → 최종 drift 38% (더 나빠짐).
+- **원인 추정**: rule 검증 프롬프트가 "엄격한 의미적 타당성"을 요구하는데, validation_score 합격선(0.8)이 너무 높을 가능성.
+- **대응**: Phase 5 10건 통계로 합격선 재조정 여지 판단 (0.8 → 0.7로 낮추는 옵션).
+
+### 설계 근거 (확인됨)
+
+- 루브릭의 "Option A (LLM 판단 존중)" 설계대로 작동. 이 설계는 LLM이 rule을 쉽게 뒤집는 것이 의도된 결과.
+- 실제 사용 시점에서는 LLM 판단의 방향성(과거 rule과 일치 vs 다름)이 의미 있는 분석 지표가 됨.
+
+### 알려진 제한사항
+
+- 단일 샘플 — Phase 5 10건 통계로 일반화 판단 필요.
+- 현재 합격 기준 0.8이 적정한지 재검토 필요.
+
+---
+
+## Phase 5 — 10개 샘플 배치 검증 (2026-04-17)
+
+### 변경 파일
+- `scripts/run_validation_batch.py` (신규)
+- `outputs/phase_E/validation_batch_10.csv` (결과)
+- `outputs/phase_E/validation_batch_10_summary.md` (요약)
+
+### 실행 결과
+
+| 지표 | 값 |
+|------|-----|
+| 샘플 수 | 10건 (v4 위주) |
+| **is_valid=True 비율** | **10/10 (100%)** |
+| target=rule (rule 통과) | **1/10 (10%)** |
+| target=llm (LLM 재매핑 후) | **9/10 (90%)** |
+| 평균 실행 시간 | 61.7초/건 |
+| **460건 예상 시간** | **472분 (약 8시간)** |
+| 460건 예상 비용 | $6~12 (gpt-4.1) |
+
+### 건물별 상세
+
+| # | 건물 | target | is_valid | track | 시간 |
+|---|------|--------|----------|-------|------|
+| 1 | BlockD15 (v4, Gold) | llm | True | llm | 102.7s |
+| 2 | BlockD22 (v4, Gold) | llm | True | llm | 69.8s |
+| 3 | Alphadom Tower (v4, Silver) | llm | True | llm | 72.1s |
+| 4 | Amorepacific HQ (v4, Platinum) | llm | True | llm | 59.3s |
+| 5 | ARMY FY13 Battalion HQ | llm | True | llm | 66.0s |
+| 6 | adidas Flagship Seoul (v4, Gold) | llm | True | llm | 56.5s |
+| 7 | Adidas Hongdae Brand Center | llm | True | llm | 52.7s |
+| 8 | Adidas Warehouse | llm | True | llm | 61.3s |
+| 9 | AIA Tower | llm | True | llm | 61.7s |
+| 10 | **AK Plaza Gwang-Myeong** | **rule** | **True** | **rule** | **14.7s** |
+
+### 핵심 관찰
+
+1. **Rule 통과율 매우 낮음**: 1/10 (10%)만 LLM 검증 통과 → 나머지 90%는 LLM 재매핑 경로로 진입.
+2. **Phase 4 관찰이 통계적으로 확인됨**: 현재 `validation_score >= 0.8` threshold 기준에서 rule 결과는 거의 항상 거부됨.
+3. **Rule 통과 시 속도 4배 빠름**: 14.7s vs 평균 61.7s (LLM 재매핑 생략).
+4. **최종 is_valid 모두 True**: 어떤 경로로든 결국 통과 — 최대 반복(3) 도달 시 강제 승인 포함.
+
+### 비용·시간 Go/No-Go
+
+- **비용 $6~12**: ✅ 수용 가능
+- **시간 8시간**: ⚠️ 하룻밤 백그라운드 실행 필요
+- **Rate limit**: 이전 Phase 0에서 tenacity retry 적용 → 정상 작동 확인됨
+
+### 전략 선택 (다음 작업 시)
+
+**선택된 전략 → Option 3 (gpt-4.1-mini로 validator 전환)**
+
+| 옵션 | 시간 단축 | 비용 절감 | 정확도 |
+|------|----------|----------|--------|
+| Option 1: 그대로 진행 | ✗ 8시간 | ✗ $12 | 기준 |
+| Option 2: threshold 0.8→0.6 | 예상 50% | 예상 50% | 중간 |
+| **Option 3: gpt-4.1-mini** | **~1/3 (3시간)** | **~1/5 ($2)** | 약간 ↓ |
+
+→ **Option 3 채택**: Phase 6 실행 전 `get_llm()` 기본 모델을 `gpt-4.1-mini`로 전환 예정.
+
+### 알려진 제한사항
+
+- Rule 검증 프롬프트가 실질적으로 "거의 항상 FAIL"을 내는 상태 → rule의 가치가 현재 구조에서 최소화됨. Phase 6에서 mini 모델 + 상세 분석 후 프롬프트 재조정 여지 확인 예정.
+- 10건 샘플이 v4 위주 → v2009, v2.2 건물의 LLM 판정 패턴은 Phase 6 전수 실행 후 확인.
+
+---
+
+## Phase 6 — 전수 460개 실행 (다음 작업 예정)
+
+### 준비된 자원
+
+- `scripts/run_pipeline_v2.py` (신규) — checkpoint 시스템 내장, `--resume` 옵션 지원
+- `data/processed/project_features_v2.parquet` (최종 출력 예정)
+- `data/processed/standardized_credits_v2.parquet` (최종 출력 예정)
+- `outputs/phase_E/llm_validation_log.csv` (건물별 LLM 검증 상세 로그)
+
+### 다음 작업 순서
+
+1. `src/langgraph_workflow/nodes.py`의 `get_llm()` 기본 모델을 `gpt-4.1-mini`로 변경
+2. `python scripts/run_pipeline_v2.py` 실행 (~3시간 예상)
+3. 완료 후 parquet 품질 검증
+4. Phase 7 (figures/tables), Phase 8 (문서 최종 정리) 진행
+
+---
+
+---
+
+### 알려진 제한사항 (통합)
 
 1. **`validation_mode` vs `validation_target` 공존**: 현재 state에 `validation_mode`("rule"/"llm")가 있고, 신규로 `validation_target`을 추가하면 두 필드의 의미가 겹칠 수 있음.
    - 해결 방안: `validation_mode`는 **최종 경로**(어느 결과가 채택됐는지), `validation_target`은 **현재 검증 대상**(rule인지 llm인지)으로 역할 분리.

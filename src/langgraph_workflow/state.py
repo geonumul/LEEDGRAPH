@@ -95,7 +95,16 @@ class LEEDStandardizationState(TypedDict):
 
     # ── 공통 제어 ──────────────────────────────────────────
     # 현재 실행 경로: "rule" | "llm"
+    # - 의미: 최종 finalize에서 어느 결과를 채택할지 결정 (rule_mapping_result vs mapping_result)
+    # - 갱신 시점: rule_mapper_node에서 "rule"로 세팅, llm_mapper_node에서 "llm"으로 변경
     validation_mode: str
+
+    # LLM validator가 현재 검증 중인 대상: "rule" | "llm"
+    # - 의미: llm_validator_node가 어느 매핑을 검증하고 있는지
+    #   "rule" → rule_mapping_result 검증 (Phase 2 신규)
+    #   "llm"  → mapping_result 검증 (기존 LLM 재매핑 결과)
+    # - 갱신 시점: 초기값 "rule", llm_mapper_node 거치면 "llm"으로 전환
+    validation_target: str
 
     # LLM 경로 반복 횟수 (rule 경로는 반복 없음)
     max_iterations: int

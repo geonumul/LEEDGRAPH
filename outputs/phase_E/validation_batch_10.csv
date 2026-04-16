@@ -1,0 +1,11 @@
+﻿pdf,project_name,version,certification_level,rule_total_v5,rule_credit_hit_rate,math_passed,math_drift,val_target,val_is_valid,val_score,val_issues,val_feedback,final_total_v5,final_track,current_iteration,elapsed_s
+Scorecard_BlockD15_120910.pdf,Block D15,v2.2,Certified,44.24,0.0,True,0.0214,llm,True,0.6,최대 반복 도달 - 강제 승인,,38.0,llm,3,102.7
+Scorecard_BlockD22_120131.pdf,Block D22,v2.2,Certified,41.75,0.0,True,0.0463,llm,True,0.6,최대 반복 도달 - 강제 승인,,41.75,llm,3,69.8
+Scorecard_AlphadomTower_180729_check.pdf,Alphadom Tower,v2009,Silver,46.24,0.0,True,0.0558,llm,True,0.6,최대 반복 도달 - 강제 승인,,31.0,llm,3,72.1
+Scorecard_AmorepacificHeadquarters_180517.pdf,Amorepacific Headquarters,v2009,Gold,55.06,0.0,True,0.0949,llm,True,0.95,"카테고리별 점수는 v5 최대값을 초과하지 않음.; IP(원본에 없음)는 0점으로 처리되어 기준 충족.; IN, RP는 v5에서 폐지되어 미반영, 기준 충족.; 달성률 드리프트(원본 71/110=64.5%, v5 44/100=44%)가 20%를 초과하나, proportional_scores(64.4점)로 보정하여 인증등급 일관성 유지.; 카테고리별 환산 근거 및 분리(SS→LT/SS) 논리적 타당.","달성률 드리프트가 원점수 기준으로는 20%를 초과하므로, proportional_scores(100점 환산) 제공이 필수적입니다. 향후에는 달성률 보정 논리를 더 명확히 기술하고, 인증등급 일관성 유지 근거를 결과에 명시하세요.",44.0,llm,2,59.3
+Scorecard_ARMYFY13MCA76196BattalionHQ_180121.pdf,ARMY FY13 MCA76196 Battalion HQ,v2009,Silver,37.93,0.0,True,0.0752,llm,True,0.6,최대 반복 도달 - 강제 승인,,37.0,llm,3,66.0
+Scorecard_adidasBrandFlagshipSeoul_230501.pdf,adidas Brand Flagship Seoul,v4,Gold,48.34,0.8846,True,0.1382,llm,True,0.6,최대 반복 도달 - 강제 승인,,48.34,llm,3,56.5
+Scorecard_AdidasHongdaeBrandCenter_200413.pdf,adidas Hongdae Brand Center,v4,Gold,51.02,0.8846,True,0.1835,llm,True,0.6,최대 반복 도달 - 강제 승인,,50.0,llm,3,52.7
+Scorecard_AdidasWarehouse_200113.pdf,Adidas Warehouse,v4,Gold,51.1,0.8438,True,0.0836,llm,True,0.6,최대 반복 도달 - 강제 승인,,51.1,llm,3,61.3
+Scorecard_AIATower_250509.pdf,AIA Tower,v4.1,Gold,71.45,1.0,True,0.0716,llm,True,0.6,최대 반복 도달 - 강제 승인,,69.0,llm,3,61.7
+Scorecard_AKPlazaGwang-Myeong_250529.pdf,AK Plaza Gwang-Myeong,v4.1,Gold,65.29,1.0,True,0.0547,rule,True,0.97,,"매핑 결과는 v4.1의 카테고리 구조(LT/SS 분리, IN 폐지, IP 신설)에 부합하며, 크레딧 누락 없이 각 카테고리 점수가 적절히 분배되었습니다. 원본 총점과 v5 환산 총점도 인증등급(Gold) 및 연면적 대비 상식적으로 일치합니다. 별도의 재매핑 지시는 필요하지 않습니다.",65.29,rule,0,14.7

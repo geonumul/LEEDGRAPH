@@ -1,22 +1,31 @@
 """
-LangGraph 그래프 구성
+LangGraph 그래프 구성 (V2: LLM 의무 검증 파이프라인)
 
-2-track 아키텍처:
-    Track 1 (결정론적, LLM 없음):
-        START → pdf_ingest → csv_match → rule_mapper → hallucination_checker
-                                                            ↓ PASS
-                                                         finalize → END
+아키텍처:
+    [공통] pdf_ingest → csv_match → rule_mapper → hallucination_checker
+                                                       │
+                           ┌───────────────────────────┼──────────────────────┐
+                  math PASS│                  math FAIL│             no API KEY│
+                           ▼                           ▼                       ▼
+                   [llm_validator]              [llm_mapper]              [finalize]
+                   target=rule                        │                        (rule 결과)
+                           │                          ▼
+                   ┌───────┴───────┐            [llm_validator]
+             PASS  │       │  FAIL │            target=llm
+                   ▼       ▼       │                  │
+              [finalize] [llm_mapper]           ┌─────┴─────┐
+              (rule결과) │     (target→llm)     │PASS │FAIL+│
+                         ▼                      ▼     ▼     │
+                   [llm_validator]         finalize llm_mapper(loop)
+                   target=llm              (llm결과)
+                         │
+                      ... (이하 LLM loop)
 
-    Track 2 (LLM 폴백, hallucination_checker FAIL 시만 진입):
-        hallucination_checker FAIL → llm_mapper → llm_validator
-                                         ↑              ↓ FAIL (< max_iter)
-                                         └──────────────┘
-                                                       ↓ PASS (또는 max_iter 도달)
-                                                    finalize → END
-
-설계 원칙:
-    - 한국 LEED 건물의 ~85%(v4/v4.1)는 Track 1만으로 처리 가능 → 토큰 절약
-    - Track 2는 구버전(v2.2, v2009 등) SS→LT 분리 추정 오류나 unknown 버전에만 진입
+설계 원칙 (V2 변경):
+    - Rule은 주 계산 주체 (결정론·재현성)
+    - LLM은 **모든** 매핑 결과의 검증자 (의미적 타당성)
+    - rule 검증 실패 시 → LLM 재매핑 → LLM 검증 loop (Option A: LLM 판단 존중)
+    - OPENAI_API_KEY 없으면 기존처럼 finalize 직행 (graceful degradation)
 """
 
 # .env 파일에서 환경변수 로드 (OPENAI_API_KEY 등)
@@ -45,29 +54,37 @@ from .nodes import (
 
 def route_after_hallucination_check(state: LEEDStandardizationState) -> str:
     """
-    hallucination_checker 결과에 따라 다음 노드 결정.
+    hallucination_checker 결과에 따라 다음 노드 결정 (V2).
 
-    PASS → "finalize" (Track 1 완료, LLM 없음)
-    FAIL → "llm_mapper" (Track 2 진입, LLM 호출)
-    FAIL + no API key → "finalize" (rule 결과 그대로 사용)
+    V2 변경: PASS 브랜치가 "finalize" → "llm_validator" 로 변경
+        (rule 결과도 LLM 의무 검증 거치게 됨)
+
+    라우팅:
+        no API KEY      → "finalize"      (LLM 없이 rule 결과 그대로)
+        math PASS       → "llm_validator" (Rule 결과 LLM 의미 검증, target=rule)
+        math FAIL       → "llm_mapper"    (Rule 계산 자체가 이상 → 구제 재매핑)
     """
     import os
     math_result = state.get("math_validation_result", {})
-    if math_result.get("passed", False):
-        return "finalize"
-    # OPENAI_API_KEY 없으면 LLM 호출 불가 → rule 결과 그대로 finalize
+    # OPENAI_API_KEY 없으면 LLM 호출 불가 → graceful degradation
     if not os.environ.get("OPENAI_API_KEY"):
         return "finalize"
+    if math_result.get("passed", False):
+        return "llm_validator"     # V2 신규: rule 결과도 LLM 검증
     return "llm_mapper"
 
 
 def route_after_llm_validation(state: LEEDStandardizationState) -> str:
     """
-    llm_validator 결과에 따라 다음 노드 결정.
+    llm_validator 결과에 따라 다음 노드 결정 (V2).
 
-    PASS (is_valid=True) → "finalize"
-    FAIL + 반복 남음   → "llm_mapper" (재매핑)
-    FAIL + 반복 초과   → "finalize" (강제 통과, 무한 루프 방지)
+    V2 변경: validation_target 값과 무관하게 동일 로직 (PASS→finalize / FAIL→llm_mapper).
+        target 전환(rule→llm)은 llm_mapper_node 내부에서 처리됨.
+
+    라우팅:
+        is_valid=True                    → "finalize"
+        is_valid=False + iter >= max     → "finalize"  (무한 루프 방지)
+        is_valid=False + iter <  max     → "llm_mapper" (재매핑)
     """
     validation = state.get("validation_result", {})
     current_iter = state.get("current_iteration", 0)
@@ -112,17 +129,18 @@ def build_standardization_graph() -> StateGraph:
     graph.add_edge("csv_match",   "rule_mapper")
     graph.add_edge("rule_mapper", "hallucination_checker")
 
-    # hallucination_checker 분기: PASS→finalize, FAIL→llm_mapper
+    # hallucination_checker 분기 (V2): PASS→llm_validator, FAIL→llm_mapper, no API→finalize
     graph.add_conditional_edges(
         "hallucination_checker",
         route_after_hallucination_check,
         {
-            "finalize":   "finalize",    # Track 1 완료
-            "llm_mapper": "llm_mapper",  # Track 2 진입
+            "finalize":      "finalize",       # no API KEY (graceful degradation)
+            "llm_validator": "llm_validator",  # V2 신규: rule 결과 LLM 의무 검증
+            "llm_mapper":    "llm_mapper",     # math FAIL → 재매핑
         },
     )
 
-    # ── 엣지: Track 2 (LLM 폴백) ─────────────────────────────────────────
+    # ── 엣지: LLM 재매핑 → LLM 검증 (loop) ────────────────────────────────
     graph.add_edge("llm_mapper", "llm_validator")
 
     # llm_validator 분기: PASS→finalize, FAIL→llm_mapper (순환)
@@ -178,6 +196,7 @@ def run_standardization(
         "validation_result":     None,
         # 제어
         "validation_mode":       "rule",
+        "validation_target":     "rule",   # V2: llm_validator 초기 검증 대상
         "max_iterations":        max_iterations,
         "current_iteration":     0,
         # 출력
