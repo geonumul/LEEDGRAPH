@@ -64,7 +64,7 @@ See `outputs/final/Figure1_pipeline.png` for the full diagram.
 
 ### SHAP Top-5 Grade Determinants
 
-| Rank | Category | Mean |SHAP| |
+| Rank | Category | Mean ㅣSHAPㅣ |
 |------|----------|------------|
 | 2 | Energy & Atmosphere (EA) | 0.8840 |
 | 3 | Indoor Env. Quality (EQ) | 0.6533 |
