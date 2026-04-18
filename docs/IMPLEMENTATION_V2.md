@@ -715,3 +715,61 @@ Rule 결과를 참고하되 검증 피드백을 반영하여 재매핑하세요.
 ```
 
 
+
+---
+
+## Phase 9 — Option A 피벗: LLM = Advisor (2026-04-19)
+
+### 배경: 왜 Option A로 피벗했는가
+
+원 V2 설계(LLM 재매핑)는 다음 문제를 내포:
+- **NLP paper 리스크**: LLM 재매핑 정확도가 방법론의 주요 검증 대상이 됨
+- **본 연구 본론과 불일치**: 한국 LEED 등급 결정 요인 SHAP 분석이 목표인데 "LLM 매핑 품질"로 논점 이동
+- **실측**: 68/75(90.7%)가 LLM 재매핑 loop → 대부분 강제 승인 (실효성 낮음)
+
+### Option A 구조
+
+- **Rule 결과 = 최종 점수** (결정론·재현성 완전 보장)
+- **LLM = 전문가 리뷰어**: 점수를 바꾸지 않고 메타데이터(`llm_review_*` 컬럼)로만 의견 제시
+- **LLM 재매핑 loop 제거**: `llm_validator` PASS/FAIL 무관 항상 finalize
+
+### 변경 파일
+
+**코드**:
+- `src/langgraph_workflow/graph.py`:
+  - `route_after_llm_validation`: 항상 `"finalize"` 반환
+  - `build_standardization_graph`: llm_validator 분기에서 `"llm_mapper"` 키 제거
+- `src/langgraph_workflow/nodes.py` (`finalize_node`):
+  - 출력 `final_v5_data`에 `llm_review_target`, `llm_review_is_valid`, `llm_review_score`, `llm_review_issues`, `llm_review_feedback` 5개 컬럼 추가
+  - Rule 결과(`rule_mapping_result`)를 항상 주 결과로 사용
+
+**스크립트**:
+- `scripts/build_option_a_dataset.py` (신규): V1 Rule 결과 460건 + Phase 6 LLM 리뷰 75건 병합
+
+### 출력 데이터셋
+
+- `data/processed/project_features_option_a.parquet` (460행)
+  - 460건 모두 Rule 기반 점수 (결정론)
+  - 75건은 `has_llm_review=True` 및 LLM 리뷰 메타데이터 포함
+  - 385건은 리뷰 필드 NaN
+
+### 검증 방법
+
+```bash
+python -c "from src.langgraph_workflow.graph import build_standardization_graph; build_standardization_graph()"
+# → "Graph compiled OK (Option A)" 정상
+```
+
+### 논문 서술 방향 (변경)
+
+**Before (V2 원안)**: "LangGraph + LLM 재매핑으로 엣지 케이스 해결"
+**After (Option A)**: "LangGraph로 Rule 기반 결정론적 표준화 + LLM 전문가 리뷰로 품질 서명"
+
+- **Q: LLM이 Rule을 뒤집을 수 있나?** → 답: No. 점수는 항상 Rule. LLM 리뷰는 **분석 시 uncertainty signal**로 활용.
+- **Q: LLM 리뷰의 역할은?** → 답: Gold 등급 건물 중 drift가 큰 케이스가 LLM 검토에서도 이슈 제기되는지 교차 검증.
+
+### 알려진 제한사항
+
+- 75/460만 LLM 리뷰됨 (Phase 6 조기 종료 사유)
+- 리뷰 커버리지: v4 53/276, v2009 12/114, v2.2 5/18, v4.1 4/48, v2.0 1/4
+- 논문 기술 시 "표본 리뷰"로 포지셔닝하거나, threshold 완화 후 전수 재실행 필요

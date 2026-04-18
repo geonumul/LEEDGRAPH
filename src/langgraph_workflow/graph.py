@@ -76,23 +76,22 @@ def route_after_hallucination_check(state: LEEDStandardizationState) -> str:
 
 def route_after_llm_validation(state: LEEDStandardizationState) -> str:
     """
-    llm_validator 결과에 따라 다음 노드 결정 (V2).
+    llm_validator 결과에 따라 다음 노드 결정.
 
-    V2 변경: validation_target 값과 무관하게 동일 로직 (PASS→finalize / FAIL→llm_mapper).
-        target 전환(rule→llm)은 llm_mapper_node 내부에서 처리됨.
+    Option A (LLM = Advisor) 구조:
+        - 항상 "finalize"로 이동
+        - LLM 판단은 메타데이터로만 기록되며 Rule 결과는 유지됨
+        - 재매핑(llm_mapper loop) 없음 — LLM이 점수를 바꾸지 않음
 
-    라우팅:
-        is_valid=True                    → "finalize"
-        is_valid=False + iter >= max     → "finalize"  (무한 루프 방지)
-        is_valid=False + iter <  max     → "llm_mapper" (재매핑)
+    배경: 본 연구는 LEED 등급 결정 요인 분석이 본론이며 NLP 논문이 아님.
+          LLM 재매핑 정확도가 방법론 주요 검증 대상이 되는 것을 피하기 위해,
+          LLM은 "전문가 리뷰" 역할만 담당하고 점수는 결정론적 Rule을 유지.
+
+    예외: math FAIL 구제 경로에서 llm_mapper를 통해 온 경우
+          (validation_target="llm"), 이는 Rule이 계산 자체를 실패한 경우이므로
+          LLM 재매핑 결과를 그대로 사용 (finalize 동일).
     """
-    validation = state.get("validation_result", {})
-    current_iter = state.get("current_iteration", 0)
-    max_iter = state.get("max_iterations", 3)
-
-    if validation.get("is_valid", False) or current_iter >= max_iter:
-        return "finalize"
-    return "llm_mapper"
+    return "finalize"
 
 
 # =============================================================================
@@ -143,13 +142,12 @@ def build_standardization_graph() -> StateGraph:
     # ── 엣지: LLM 재매핑 → LLM 검증 (loop) ────────────────────────────────
     graph.add_edge("llm_mapper", "llm_validator")
 
-    # llm_validator 분기: PASS→finalize, FAIL→llm_mapper (순환)
+    # llm_validator 분기 (Option A): 항상 finalize (LLM 재매핑 제거)
     graph.add_conditional_edges(
         "llm_validator",
         route_after_llm_validation,
         {
-            "finalize":   "finalize",    # Track 2 완료
-            "llm_mapper": "llm_mapper",  # 재매핑 (최대 max_iterations회)
+            "finalize": "finalize",
         },
     )
 

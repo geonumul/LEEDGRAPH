@@ -1271,6 +1271,12 @@ def finalize_node(state: LEEDStandardizationState) -> LEEDStandardizationState:
         "standardization_track":   mode,
         "standardization_iterations": state.get("current_iteration", 0),
         "mapping_rationale":       mapping.get("mapping_rationale", ""),
+        # Option A: LLM 리뷰 메타데이터 (점수는 바꾸지 않음, 분석용 signal)
+        "llm_review_target":       (state.get("validation_result") or {}).get("target"),
+        "llm_review_is_valid":     (state.get("validation_result") or {}).get("is_valid"),
+        "llm_review_score":        (state.get("validation_result") or {}).get("validation_score"),
+        "llm_review_issues":       "; ".join((state.get("validation_result") or {}).get("issues", []))[:500],
+        "llm_review_feedback":     ((state.get("validation_result") or {}).get("feedback") or "")[:500],
     }
 
     log = (
