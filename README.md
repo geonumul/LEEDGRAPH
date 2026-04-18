@@ -1,142 +1,129 @@
 # LEEDGRAPH
 
-> Korean LEED-certified building analysis pipeline: multi-version standardization to LEED v5 + XAI (SHAP) for grade determinant factor analysis.
+> 한국에서 인증받은 LEED 건물 460개를 분석하는 프로젝트.
+> 서로 다른 LEED 버전 점수를 한 버전(v5)으로 맞추고, 어떤 카테고리가 등급을 결정하는지 SHAP으로 분석함.
 
 ---
 
-## 1. Research Overview
+## 1. 이 프로젝트는 뭘 하는가?
 
-This project analyzes 460 Korean LEED-certified buildings spanning LEED versions v2.0–v4.1. The core contributions are:
-1. **Version harmonization**: Proportional-scaling rules (107 rule-based mappings) to unify all versions under the LEED v5 schema.
-2. **Grade factor analysis**: XGBoost + SHAP TreeExplainer to identify which categories most influence certification grade.
+LEED는 건물 친환경 인증 제도야. 문제는 시간이 지나면서 인증 버전이 v2.0 → v2.2 → v2009 → v4 → v4.1 이렇게 계속 바뀌었다는 것. 버전마다 점수 배분 방식이 다르니까 직접 비교가 안 돼.
 
-Key finding: **Energy & Atmosphere (EA)** is the dominant grade determinant (mean |SHAP|=0.8840), followed by **Indoor Env. Quality (EQ)** and **Water Efficiency (WE)**.
+이 프로젝트는:
+1. **버전 통일**: 모든 건물 점수를 최신 v5 기준으로 환산 (107개 규칙 사용)
+2. **등급 결정 요인 분석**: XGBoost로 등급(Certified/Silver/Gold/Platinum)을 예측하는 모델 학습 → SHAP으로 어느 카테고리가 가장 중요한지 파악
 
----
-
-## 2. Research Differentiators
-
-| Item | Previous Studies | This Study |
-|------|-----------------|-----------|
-| Version coverage | Single version | v2.0 / v2.2 / v2009 / v4 / v4.1 |
-| Standardization | Manual / none | Rule-based proportional scaling to v5 |
-| Sample size | < 100 (typical) | **460 Korean buildings** |
-| XAI method | Feature importance | SHAP TreeExplainer (credit-level) |
-| Focus | Global benchmarks | Korean building stock |
+**핵심 결과**: **Energy & Atmosphere (EA, 에너지)** 카테고리가 등급을 가장 크게 좌우함.
 
 ---
 
-## 3. Pipeline Diagram
+## 2. 기존 연구와 뭐가 다른가?
+
+| 항목 | 기존 연구들 | 이 프로젝트 |
+|------|------------|------------|
+| 버전 | 보통 한 버전만 | v2.0~v4.1 전부 |
+| 표준화 | 수동 또는 없음 | 규칙 기반 자동 환산 |
+| 샘플 수 | 보통 100개 미만 | **460개 (한국 전수)** |
+| 해석 방법 | 기본 feature importance | SHAP (크레딧 단위까지) |
+| 지역 | 해외 벤치마크 | 한국 건물 stock |
+
+---
+
+## 3. 전체 파이프라인
 
 ```
-460 PDFs  →  PDF Ingest + CSV Match  →  Rule Mapper (107 rules)
-                                              ↓ PASS (100%)
-                                       v5 Standardized Scores
-                                              ↓
-                                       XGBoost + SHAP  →  Grade Determinants
+460개 PDF → PDF 파싱 + CSV 매칭 → Rule Mapper (107개 규칙 적용)
+                                          ↓
+                                  v5 표준화 점수
+                                          ↓
+                                  XGBoost + SHAP → 등급 결정 요인
 ```
 
-See `outputs/final/Figure1_pipeline.png` for the full diagram.
+중간에 LangGraph로 "LLM 전문가 리뷰어"를 붙일 수 있어 (Option A). 점수는 안 바꾸고 검증 signal만 제공.
+
+자세한 그림: `outputs/final/Figure1_pipeline.png`
 
 ---
 
-## 4. Data
+## 4. 데이터
 
-| Item | Detail |
-|------|--------|
-| Raw scorecards | 460 PDFs (Korean LEED projects) |
-| Building directory | PublicLEEDProjectDirectory.csv (456 rows) |
-| LEED versions | v2.0, v2.2, v2009 (v3), v4, v4.1 |
-| Post-standardization | v5 schema, 9,747 credit records, 7 categories |
-| Grade distribution | Gold 235 (51%) / Silver 118 (26%) / Platinum 56 (12%) / Certified 51 (11%) |
+| 항목 | 내용 |
+|------|------|
+| PDF 스코어카드 | 460개 (한국 LEED 인증 건물 전부) |
+| 프로젝트 목록 | PublicLEEDProjectDirectory.csv (456개) |
+| LEED 버전 | v2.0 / v2.2 / v2009 / v4 / v4.1 |
+| 표준화 후 | v5 기준, 9,747개 크레딧, 7개 카테고리 |
+| 등급 분포 | Gold 235 (51%) / Silver 118 (26%) / Platinum 56 (12%) / Certified 51 (11%) |
 
 ---
 
-## 5. Key Results
+## 5. 주요 결과
 
-### Model Performance (XGBoost, 5-Fold CV)
+### 예측 모델 (XGBoost, 5-Fold CV)
 
-| Metric | Value |
-|--------|-------|
-| CV Accuracy | **0.8174 ± 0.0502** |
+| 지표 | 값 |
+|------|-----|
+| CV 정확도 | **0.8174 ± 0.0502** |
 | CV Weighted F1 | **0.8157 ± 0.0504** |
-| Features | 9 (ratio_EA/LT/MR/EQ/WE/SS/IP + log_area + version) |
+| 사용한 feature | 9개 (카테고리 달성률 7개 + 면적 + 버전) |
 
-### SHAP Top-5 Grade Determinants
+### SHAP Top-5 등급 결정 요인
 
-| Rank | Category | Mean ㅣSHAPㅣ |
-|------|----------|------------|
-| 2 | Energy & Atmosphere (EA) | 0.8840 |
-| 3 | Indoor Env. Quality (EQ) | 0.6533 |
-| 4 | Water Efficiency (WE) | 0.5895 |
-| 5 | Location & Transportation (LT) | 0.4377 |
-| 6 | LEED Version | 0.2880 |
+| 순위 | 카테고리 | 평균 \|SHAP\| |
+|------|---------|------------|
+| 1 | Energy & Atmosphere (EA) | 0.8840 |
+| 2 | Indoor Env. Quality (EQ) | 0.6533 |
+| 3 | Water Efficiency (WE) | 0.5895 |
+| 4 | Location & Transportation (LT) | 0.4377 |
+| 5 | LEED Version | 0.2880 |
+
+→ **에너지(EA)가 압도적**. 실내환경(EQ)과 물(WE)이 그 다음.
 
 ---
 
-## 6. Quickstart
+## 6. 빠른 시작
 
 ```bash
 pip install -r requirements_frozen.txt
 
-# Step 1: Run full pipeline (PDF → standardized parquet)
+# 1단계: 파이프라인 실행 (PDF → 표준화된 parquet)
 python scripts/run_pipeline.py
 
-# Step 2: Run XGBoost + SHAP analysis
+# 2단계: XGBoost + SHAP 분석
 python scripts/run_analysis.py
 ```
 
 ---
 
-## 7. Directory Structure
+## 7. 폴더 구조
 
 ```
 LEEDGRAPH/
 ├── data/
-│   ├── raw/
-│   │   ├── scorecards/          # 460 PDF scorecards
-│   │   ├── buildings_list/      # PublicLEEDProjectDirectory.csv
-│   │   └── rubrics/             # LEED rubric xlsx + mapping_rules.yaml
-│   └── processed/
-│       ├── project_features.parquet   # ML input (460 × 28)
-│       └── standardized_credits.parquet  # 9,747 credit-level records
+│   ├── raw/               # 원본 PDF, 루브릭, CSV
+│   └── processed/         # 표준화된 parquet (ML 학습용)
 ├── src/
-│   ├── data/
-│   │   ├── loader.py            # PDF + CSV parser
-│   │   └── rubric_loader.py     # Rubric xlsx loader
-│   ├── langgraph_workflow/
-│   │   ├── state.py             # LangGraph state
-│   │   ├── nodes.py             # Pipeline nodes (rule mapper, hallucination checker)
-│   │   └── graph.py             # LangGraph graph definition
-│   └── analysis/
-│       ├── ml_models.py         # ML training utilities
-│       └── xai_shap.py          # SHAP analysis utilities
-├── scripts/
-│   ├── run_pipeline.py          # Phase C: full pipeline runner
-│   └── run_analysis.py          # Phase D: XGBoost + SHAP
-├── outputs/
-│   ├── phase_A/ ~ phase_D/      # Phase-wise reports
-│   └── final/                   # Paper-ready figures & tables
-├── docs/
-│   └── RUBRIC_1DAY.md           # 1-day sprint plan
-└── requirements_frozen.txt
+│   ├── data/              # 파서 (PDF, CSV, 루브릭)
+│   ├── langgraph_workflow/  # LangGraph 파이프라인 (state / nodes / graph)
+│   └── analysis/          # ML & SHAP 유틸
+├── scripts/               # 실행 스크립트들
+├── outputs/               # phase별 리포트 + final figures/tables
+└── docs/                  # 문서
 ```
 
 ---
 
-## 8. Limitations & Future Work
+## 8. 한계와 향후 과제
 
-- **10.2% high-drift cases** (47 buildings): Newly certified LEED v5 buildings with uncertain version detection. Standardization results carry higher uncertainty for these.
-- **12% unmatched credits**: Credit names not covered by mapping rules (primarily v5-format PDFs and rare credits).
-- **Model overfitting on training data**: CV accuracy 82.4% is reliable; train accuracy 100% reflects memorization — future work should use a holdout test set.
-- **v2009 credit-level data unavailable**: Only category totals parsed; credit-level SHAP analysis excluded for these 114 buildings.
-
-Future directions: expand mapping rules for v5 native buildings, incorporate building-level metadata (location, program type) as additional features.
+- **10.2% 건물은 drift가 큼**: v5 native PDF 또는 버전 식별 애매. 표준화 불확실성 ↑.
+- **12% unmatched 크레딧**: 매핑 규칙에 없는 크레딧 이름 (주로 v5 포맷).
+- **train 정확도 100%는 overfitting 지표**: 논문에는 CV 값(0.8174) 사용할 것.
+- **v2009 크레딧 상세 파싱 불가**: 카테고리 합계만 씀. 114건은 크레딧 레벨 SHAP 제외.
 
 ---
 
-## 9. License / Citation / Contact
+## 9. 라이선스 / 연락처
 
-- Data: USGBC Public LEED Project Directory (public domain)
-- Code: MIT License
+- 데이터: USGBC Public LEED Project Directory (public domain)
+- 코드: MIT License
 - Contact: geonumul (GitHub)

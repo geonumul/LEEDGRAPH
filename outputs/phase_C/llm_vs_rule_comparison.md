@@ -1,149 +1,92 @@
-# LLM 매핑 vs Rule 매핑 비교 분석
+# LLM vs Rule 매핑 비교 (쉬운 버전)
 
-**생성일**: 2026-04-15 (run_llm_retry.py 완료 후 업데이트)  
-**대상**: LLM 경로 처리 47건 vs Rule 경로 처리 413건
+## 이 문서가 뭐야
 
----
-
-## 1. 처리 경로 분기 조건
-
-LangGraph hallucination_checker 노드가 두 조건 중 하나라도 실패하면 LLM 경로 진입:
-- `ratio_drift > 0.20` (원본 달성률 vs v5 달성률 차이 20% 초과)
-- 카테고리 점수가 v5 최대값 초과 (`ratio > 1.0`)
-
-run_llm_retry.py (tenacity exponential backoff) 실행 후 최종 47건이 LLM 경로 완료.
+V1 파이프라인 결과에서 **LLM 경로로 간 47건 vs Rule 경로로 간 413건**을 비교. 어떤 건물이 LLM까지 갔고, 결과가 얼마나 달랐는지 분석.
 
 ---
 
-## 2. 두 트랙 간 주요 통계 비교
+## 처리 경로는 어떻게 갈리나?
+
+수학 검증 단계에서 2가지 조건 중 하나라도 실패하면 LLM 경로:
+- **drift > 20%**: 원본 달성률과 v5 달성률 차이가 20% 초과
+- **카테고리 최대값 초과**: ratio > 1.0
+
+통과하면 Rule 결과 그대로 저장.
+
+---
+
+## 두 경로 비교 통계
 
 | 지표 | Rule 경로 (413건) | LLM 경로 (47건) |
 |------|------------------|-----------------|
-| Drift 평균 | **10.7%** | **22.6%** |
-| Drift 중앙값 | 10.7% | 21.7% |
-| Drift 최대 | 19.7% | 48.3% |
-| v5 총점 평균 | 46.0 pt | 37.4 pt |
-| v5 총점 중앙값 | 43.3 pt | 36.0 pt |
+| drift 평균 | 10.7% | **22.6%** |
+| drift 최대 | 19.7% | 48.3% |
+| v5 총점 평균 | 46.0 | 37.4 |
 | Rule hit rate 평균 | - | ~87% |
 
-> **해석**: LLM 경로 건물은 rule 매핑 시 drift가 높게 나타나는 구조적 특성이 있음.
-> v5 총점이 낮은 이유: 해당 건물들이 실제로 낮은 v5 환산 점수를 받는 고급 소매(retail) 건물이기 때문.
+→ LLM 경로 건물은 **drift가 구조적으로 큼**. v5 점수도 Rule 경로 대비 낮음.
 
 ---
 
-## 3. LLM 경로 18건 상세
+## LLM 경로 47건이 어떤 건물들인가
 
-| 건물명 | 버전 | 등급 | 원본점수 | v5점수 | Drift | Rule Hit |
-|--------|------|------|---------|--------|-------|---------|
-| Cheongna Logistics Center | v4 | Gold | 61.0 | 30.0 | 20.5% | 88.2% |
-| FENDI Seoul Flagship | v4 | Gold | 71.0 | 38.0 | 27.2% | 87.5% |
-| **Gucci Yeoju Premium Outlet** | **v2.2** | **Gold** | **72.0** | **53.0** | **48.3%** | **11.1%** |
-| Prada Daegu Lotte | v4 | Gold | 68.0 | 37.0 | 24.3% | 87.5% |
-| Prada Daejeon Hyundai Premium Outlet | v4 | Gold | 64.0 | 32.0 | 21.4% | 87.0% |
-| Prada Korea Hyundai Gangnam DFS | v4 | Gold | 67.0 | 31.0 | 23.3% | 87.5% |
-| Prada Seoul Hyundai APKU Uomo | v4 | Gold | 68.0 | 39.5 | 21.8% | 87.5% |
-| Prada Yeoju Outlet | v4 | Gold | 64.0 | 33.0 | 22.5% | 87.5% |
-| Prada Yongin Shinsegae Gyeonggi B1F | v4 | Gold | 70.0 | 32.0 | 23.7% | 87.0% |
-| Pulmuone Together Welfare Center | v4 | Gold | 64.0 | 26.0 | 21.9% | 88.0% |
-| Python Construction Project | v4 | Silver | 56.0 | 25.0 | 20.4% | 91.4% |
-| Samsung Display Research Building | v4 | Platinum | 85.0 | 46.0 | 20.4% | 91.4% |
-| Siheung Logistics Centre | v4 | Gold | 63.0 | 28.0 | 20.1% | 85.7% |
-| TIFFANY & Co. Korea Hyundai Coex PERM | v4 | Gold | 66.0 | 34.0 | 24.9% | 87.5% |
-| Tiffany Galleria East Seoul | v4 | Gold | 63.0 | 31.0 | 21.7% | 90.9% |
-| Tiffany Korea Hyundai Parc | v4 | Gold | 65.0 | 36.0 | 22.9% | 87.5% |
-| Tiffany Korea Shinsegae Gyeonggi | v4 | Gold | 64.0 | 31.0 | 21.3% | 87.5% |
-| Tiffany Lotte Downtown | v4 | Gold | 62.0 | 36.0 | 23.4% | 87.0% |
+대부분 **구버전(v2.x, v2009)** + **고급 소매(Prada, Tiffany, Gucci)** + **물류센터(Cheongna, Siheung)**.
+
+| 건물 유형 | 이유 |
+|----------|------|
+| v2.2 건물 | SS에 교통 포함 → LT 분리 비율 추정 오차 |
+| 고급 소매 | LT 비중 높고 EA 낮은 비정형 패턴 |
+| 물류센터 | 외곽 위치 + 에너지 집약형 → 구조적 drift |
+
+**최악 케이스**: Gucci Yeoju Premium Outlet (v2.2, Gold) — drift 48.3%, Rule hit rate 11.1% (매핑 실패율 높음).
 
 ---
 
-## 4. 크레딧 레벨 분석 (LLM 경로 18건)
+## 어떤 크레딧에서 차이가 발생하나
 
-| v5 카테고리 | 크레딧 수 | 비율 |
-|------------|---------|------|
-| EA (에너지) | 151 | 36.8% |
-| LT (입지/교통) | 68 | 16.6% |
-| EQ (실내환경) | 54 | 13.2% |
-| WE (물) | 48 | 11.7% |
-| MR (재료) | 37 | 9.0% |
-| SS (지속가능 부지) | 21 | 5.1% |
-| IP (혁신/우선) | 15 | 3.7% |
+LLM 경로 건물 47건의 크레딧 매핑 분포:
 
-**매핑 방식**:
-- rule 매핑: 395건 (87.0%)
-- unmatched (v5_code=UNKNOWN): 61건 (13.4%)
+| v5 카테고리 | 크레딧 수 |
+|------------|---------|
+| EA (에너지) | 151 (37%) |
+| LT (입지/교통) | 68 (17%) |
+| EQ (실내환경) | 54 (13%) |
+| WE (물) | 48 (12%) |
+| MR (재료) | 37 (9%) |
+| SS (부지) | 21 (5%) |
+| IP (혁신) | 15 (4%) |
 
----
-
-## 5. 어떤 크레딧에서 차이가 발생하는가
-
-### 5.1 높은 drift의 원인 분석
-
-**Case 1: Gucci Yeoju Premium Outlet (v2.2, drift=48.3%)**  
-- v2.2는 LT 카테고리 없음 (SS에 교통 크레딧 통합)
-- Rule mapper: SS 교통분 비율 추정 → LT로 배분  
-- Rule hit rate 11.1% (매우 낮음) → 크레딧명이 v2.2 체계와 달라 매핑 실패
-- LLM 판단: 원본 SS(14pt/21pt) 중 교통 관련 약 40% → LT=5.6pt 추정
-- **결론**: v2.2 크레딧명이 v4와 달라 rule 매핑 실패 → LLM 개입 타당
-
-**Case 2: 고급 소매(Retail) 건물군 (Prada, Tiffany, FENDI)**  
-- v4 BD+C 인증이지만 소매 특화 운영 패턴
-- EA(에너지) 점수 비중 낮음 (ratio_EA ≈ 0.35): 대형 건물 대비 에너지 집약도 낮음
-- LT(입지/교통) 비중은 높음 (ratio_LT ≈ 0.8): 도심 상업지구 위치
-- Rule hit rate ≈ 87.5%: rule 매핑 자체는 양호, drift는 구조적 원인
-
-**Case 3: 물류센터(Cheongna, Siheung, LX Pantos)**  
-- 외곽 위치 → LT(입지/교통) 비중 낮음 (ratio_LT=0.33~0.53)
-- 에너지 집약형 창고 → EA 점수 낮음
-- drift 원인: v4 기준 EA 최대 33pt vs v5 환산 후 실제 획득 낮음
-
-### 5.2 LLM 판단의 타당성 평가
-
-| 건물 | LLM 전 (rule) drift | LLM 후 drift | 판단 |
-|------|-------------------|-------------|------|
-| Gucci Yeoju Premium Outlet | >48% | 48.3% | LLM도 높음 - v2.2 구조 자체의 한계 |
-| Prada Daegu Lotte | ~24% | 24.3% | LLM이 수렴 - rule 결과 유사 |
-| Samsung Display Research | ~20% | 20.4% | 경계선 - LLM/rule 차이 미미 |
-
-> **총평**: LLM 경로 건물의 drift가 LLM 처리 후에도 높은 이유는 LLM이 "틀렸기" 때문이 아니라,
-> 해당 건물의 LEED 획득 패턴이 v5 카테고리 배분과 구조적으로 불일치하기 때문임.
-> 특히 v2.2 건물(교통/SS 분리 없음)과 소매 건물(에너지/교통 역전)에서 불가피.
+매핑 방식: rule 87%, unmatched 13%.
 
 ---
 
-## 6. Rule만 적용했을 때와의 차이 추정
+## LLM 판단의 타당성
 
-LLM 경로 18건에 대해 rule fallback 결과를 직접 비교할 수 없으나,
-**429 에러로 rule fallback된 47건 중 일부**가 LLM 결과의 대리 비교군이 됨.
+### Case 1: Gucci Yeoju (v2.2, drift 48.3%)
+- Rule hit rate 11.1% → 매핑 규칙으로 거의 해결 안 됨
+- v2.2는 SS에 교통 포함 → LT 추정 구조적 어려움
+- **LLM 개입 타당** (Rule이 잘 안 되는 케이스)
 
-| 지표 | 추정 Rule-only | LLM 처리 후 |
-|------|------------|------------|
-| Drift > 20% 건수 | 47건 | 18건 (나머지 29건은 rule fallback으로 drift > 20% 유지) |
-| 평균 drift (해당 그룹) | ~25% | 23.9% |
-| 크레딧 unmatched 비율 | ~15% | 13.4% |
+### Case 2: 고급 소매 건물군
+- Rule hit rate 87%로 매핑 자체는 잘 됨
+- 하지만 건물 특성상 drift 20% 넘음
+- LLM 개입해도 drift 해소 한계 (구조적 특성)
 
-> LLM 개입으로 drift 소폭 감소 및 unmatched 크레딧 약 감소. 개선 효과는 제한적이나
-> **논문에서 "LLM 폴백이 rule만으로 해결 불가능한 케이스에 전문가 판단을 제공"**으로 기술 가능.
-
----
-
-## 7. 결론 및 논문 기술 방향
-
-1. **LLM 경로 진입 조건**: drift > 20% (18건, 전체의 4.2%)
-2. **LLM 효과**: rule 대비 unmatched 크레딧 ~1.6%p 감소, drift 소폭 개선
-3. **한계**: v2.2 구버전 및 소매 건물은 LLM으로도 drift 완전 해소 불가
-4. **논문 표현 예시**:
-   > "For 4.2% of samples exceeding the 20% drift threshold, an LLM-based fallback mapper
-   > (gpt-4.1) was employed. The LLM pathway reduced unmatched credits by 1.6 percentage
-   > points compared to rule-only mapping, though structural version incompatibilities
-   > (e.g., LEED v2.2 SS/LT conflation) remain unresolved."
+### Case 3: 물류센터
+- 외곽 위치 → LT 비중 구조적으로 낮음
+- drift 20% 넘는 건 v4 체계 자체의 한계
 
 ---
 
-## 8. 재처리 필요 (run_llm_retry.py)
+## 결론 및 논문 활용
 
-47건의 429 rate-limit 파일은 `tenacity` exponential backoff 적용 후 재처리 예정:
-- 최소 2초 sleep (TPM 30k 기준)
-- 최대 5회 재시도 (2→4→8→16→32초 backoff)
-- 최종 실패 시 rule fallback 유지
+1. **LLM 경로 10.2%는 구조적 엣지 케이스** (구버전 / 비정형 건물 유형)
+2. **LLM 개입이 drift를 완전히 해소하진 못함** — v2.2 같은 구조적 한계 존재
+3. 논문 표현: "4.2% of samples exceeding the 20% drift threshold were routed through an LLM-based fallback mapper (gpt-4.1) to address structural version incompatibilities."
 
-재처리 후 이 문서의 "drift 개선 정도" 섹션 업데이트 예정.
+---
+
+## 주의사항
+
+이 문서는 **V1 파이프라인** 결과 기반. V2(Option A)에서는 LLM이 점수를 바꾸지 않고 검증만 하므로 "LLM 경로" 개념이 달라짐. Option A 분석은 `outputs/phase_D_option_a/shap_comparison.md` 참고.
