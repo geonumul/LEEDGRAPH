@@ -276,7 +276,10 @@ def _lookup_credit_rule(credit_name: str, version: str) -> dict | None:
 
 
 def get_llm(model: str = "gpt-4.1", temperature: float = 0.1) -> ChatOpenAI:
-    """LLM 인스턴스 생성. LLM 노드에서만 호출됨."""
+    """LLM 인스턴스 생성. LLM 노드에서만 호출됨.
+
+    Phase 6 재실행: gpt-4.1로 복귀 (mini는 시간 단축 효과 미미, 정확도 ↓).
+    """
     return ChatOpenAI(model=model, temperature=temperature)
 
 

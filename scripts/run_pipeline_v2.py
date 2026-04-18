@@ -121,8 +121,8 @@ def main(resume: bool = False):
         fname = pdf.name
         if fname in processed:
             continue
-        if i % 10 == 0 or i == 1 or i == total:
-            print(f"[{i:3d}/{total}] {fname[:60]}")
+        if i % 5 == 0 or i == 1 or i == total:
+            print(f"[{i:3d}/{total}] {fname[:60]}", flush=True)
 
         try:
             state = run_standardization(pdf_path=str(pdf), directory_df=csv_df)
@@ -207,10 +207,10 @@ def main(resume: bool = False):
             counters["failed"] += 1
             logger.warning(f"{fname}: {type(e).__name__}: {e}")
 
-        # 50건마다 체크포인트
-        if i % 50 == 0:
+        # 5건마다 체크포인트 (세션 끊김 방지)
+        if i % 5 == 0:
             save_checkpoint(feat_rows, cred_rows, log_rows)
-            print(f"  체크포인트 저장 ({i}/{total})")
+            print(f"  체크포인트 저장 ({i}/{total})", flush=True)
 
     # 최종 저장
     save_checkpoint(feat_rows, cred_rows, log_rows)
