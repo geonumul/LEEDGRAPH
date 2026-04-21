@@ -1,0 +1,5 @@
+﻿Model,CV_Acc_mean,CV_Acc_std,CV_F1_mean,CV_F1_std
+LightGBM,0.8196,0.0398,0.8181,0.0389
+RandomForest,0.8217,0.0087,0.818,0.0078
+XGBoost,0.8152,0.0451,0.8133,0.0433
+LogReg,0.8087,0.0433,0.8049,0.0462

@@ -1,6 +1,8 @@
 ﻿subset,N,CV_Acc,CV_F1,Top1,Top2,Top3
-full,460,0.8152,0.8133,ratio_EA,ratio_EQ,ratio_WE
+전체,460,0.8152,0.8133,ratio_EA,ratio_EQ,ratio_WE
 credit_hit>0.7,324,0.8333,0.8267,ratio_EA,ratio_EQ,ratio_WE
-old_versions,136,0.7865,0.7794,ratio_EA,ratio_WE,ratio_LT
-new_versions,324,0.8333,0.8267,ratio_EA,ratio_EQ,ratio_WE
-llm_reviewed,75,0.7067,0.6694,ratio_EA,ratio_WE,ratio_LT
+"구버전(v2.x, v2009)",136,0.7865,0.7794,ratio_EA,ratio_WE,ratio_LT
+"신버전(v4, v4.1)",324,0.8333,0.8267,ratio_EA,ratio_EQ,ratio_WE
+Gold 이상,291,0.9415,0.9381,ratio_LT,ratio_SS,ratio_WE
+연면적 > 10000sqm,284,0.7954,0.7897,ratio_EA,ratio_EQ,ratio_WE
+LLM 리뷰됨,75,0.7067,0.6694,ratio_EA,ratio_WE,ratio_LT
