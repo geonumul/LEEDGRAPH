@@ -1,7 +1,11 @@
-﻿항목,표준화 전,표준화 후
-총 프로젝트 수,460개 PDF (22개 버전×시스템 조합),460개 (100% 성공)
-LEED 버전,v2.0/v2.2/v2009/v4/v4.1,v5 체계로 통합
-카테고리 수,버전별 5~9개,7개 (LT/SS/WE/EA/MR/EQ/IP)
-크레딧 레코드 수,-,"9,747행 (standardized_credits.parquet)"
-인증 등급 분포,Certified~Platinum,"Gold 51%, Silver 26%, Platinum 12%, Certified 11%"
-매핑 방법,-,Rule 79% / Category-proportional 9% / Unmatched 12%
+﻿항목,건수
+총 건물,460
+Gold,235
+Silver,118
+Platinum,56
+Certified,51
+v4,276
+v2009,114
+v4.1,48
+v2.2,18
+v2.0,4
