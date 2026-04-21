@@ -10,19 +10,29 @@
 
 ```
 LEEDGRAPH/
-├── data/                # raw PDF + processed parquet
+├── README.md
+├── requirements.txt
+│
+├── data/                # 원본 + 가공 데이터
+│   ├── scorecards/        (460 PDF)
+│   ├── rubrics/           (LEED 루브릭 + mapping_rules.yaml)
+│   ├── project_directory.csv
+│   ├── project_features.parquet        ← ML 학습 입력
+│   ├── project_features_option_a.parquet  (LLM 리뷰 포함)
+│   └── standardized_credits.parquet
+│
 ├── notebooks/           # ⭐ 분석 실행
 │   ├── 01_전처리.ipynb
-│   └── 02_데이터분석.ipynb
-├── src/                 # 라이브러리 코드
+│   ├── 02_데이터분석.ipynb
+│   └── src/              (내부 파이프라인 라이브러리 — 노트북이 import)
+│
 ├── results/
-│   ├── tables/          # 6개 CSV
-│   └── figures/         # 10개 PNG
-├── docs/                # 해설 문서 3개
-│   ├── 01_전처리_과정.md
-│   ├── 02_파이프라인_설계.md
-│   └── 03_분석_방법론.md
-└── README.md
+│   ├── tables/           (6 CSV)
+│   └── figures/          (10 PNG)
+│
+└── docs/
+    ├── 01_전처리_과정.md
+    └── 02_파이프라인_및_분석.md
 ```
 
 ---
@@ -32,14 +42,14 @@ LEEDGRAPH/
 ```bash
 pip install -r requirements.txt
 
-# 1. 전처리 (PDF → parquet)
+# 1. 전처리 (PDF → parquet, API 키 불필요)
 jupyter notebook notebooks/01_전처리.ipynb
 
 # 2. 분석 (XGBoost + SHAP)
 jupyter notebook notebooks/02_데이터분석.ipynb
 ```
 
-LLM 전문가 리뷰도 원하면 `.env` 에 `OPENAI_API_KEY` 설정 후 `01_전처리.ipynb` 실행.
+LLM 전문가 리뷰를 원하면 `.env` 에 `OPENAI_API_KEY` 설정.
 
 ---
 
@@ -48,9 +58,9 @@ LLM 전문가 리뷰도 원하면 `.env` 에 `OPENAI_API_KEY` 설정 후 `01_전
 | 지표 | 값 |
 |------|-----|
 | 데이터 | 460건 (한국 LEED 전수) |
-| CV 정확도 | **0.8174 ± 0.0502** |
-| CV Weighted F1 | **0.8157 ± 0.0504** |
-| Top SHAP | **Energy (EA), 0.8840** |
+| CV 정확도 | **0.8152 ± 0.0471** |
+| CV Weighted F1 | **0.8133 ± 0.0464** |
+| Top SHAP | **Energy (EA), 0.8618** |
 
 Robustness: 어느 subset이든 EA가 Top feature.
 

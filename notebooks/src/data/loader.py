@@ -113,25 +113,24 @@ LEED_GRADE_THRESHOLDS = {
 class LEEDDataLoader:
     """LEED 프로젝트 데이터 로더"""
 
-    def __init__(self, data_dir: str = "data/raw"):
+    def __init__(self, data_dir: str = "data"):
         self.data_dir = Path(data_dir)
 
     # ─────────────────────────────────────────────
-    # 1. PublicLEEDProjectDirectory.xlsx 로딩
+    # 1. PublicLEEDProjectDirectory 로딩
     # ─────────────────────────────────────────────
     def load_project_directory(
-        self, filename: str = "PublicLEEDProjectDirectory.csv"
+        self, filename: str = "project_directory.csv"
     ) -> pd.DataFrame:
         """
-        USGBC 공개 프로젝트 디렉토리 로딩 (CSV 또는 xlsx 자동 감지).
+        USGBC 공개 프로젝트 디렉토리 로딩.
 
         주요 컬럼:
             - ID, ProjectName, Country, LEEDSystemVersion
             - CertLevel, PointsAchieved, CertDate, GrossFloorArea
         """
-        filepath = self.data_dir / "buildings_list" / filename
+        filepath = self.data_dir / filename
         if not filepath.exists():
-            # 확장자 자동 탐색
             for ext in (".csv", ".xlsx"):
                 alt = filepath.with_suffix(ext)
                 if alt.exists():
@@ -140,7 +139,7 @@ class LEEDDataLoader:
             else:
                 raise FileNotFoundError(
                     f"파일을 찾을 수 없습니다: {filepath}\n"
-                    "USGBC에서 데이터를 다운로드하여 data/raw/buildings_list/ 폴더에 저장해주세요."
+                    "USGBC에서 데이터를 다운로드하여 data/ 폴더에 저장해주세요."
                 )
 
         if filepath.suffix == ".csv":

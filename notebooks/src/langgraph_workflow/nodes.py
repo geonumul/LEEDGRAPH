@@ -37,16 +37,16 @@ from .state import LEEDStandardizationState
 from src.data.loader import LEEDDataLoader, LEED_VERSION_MAX_SCORES
 from src.data.rubric_loader import load_all_rubrics, get_rubric_max
 
-# 루브릭 캐시: 모듈 로딩 시 1회 스캔 (data/raw/rubrics/ 아래 xlsx 자동 감지)
+# 루브릭 캐시: 모듈 로딩 시 1회 스캔 (data/rubrics/ 아래 xlsx 자동 감지)
 # 파일이 없으면 빈 dict → 기존 hardcoded fallback으로 동작 (에러 없음)
 _RUBRIC_CACHE: dict = load_all_rubrics()
 
-# 매핑 규칙 캐시: data/raw/rubrics/mapping_rules.yaml
+# 매핑 규칙 캐시: data/rubrics/mapping_rules.yaml
 # {source_credit_lower: [rule_dict, ...]} 인덱스로 빠른 부분 문자열 조회
 _MAPPING_RULES: list = []
 _MAPPING_RULES_INDEX: dict = {}
 try:
-    _rules_path = Path("data/raw/rubrics/mapping_rules.yaml")
+    _rules_path = Path("data/rubrics/mapping_rules.yaml")
     if _rules_path.exists():
         with open(_rules_path, "r", encoding="utf-8") as _f:
             _MAPPING_RULES = yaml.safe_load(_f) or []
@@ -504,7 +504,7 @@ def rule_mapper_node(state: LEEDStandardizationState) -> LEEDStandardizationStat
     # ── 카테고리별 실제 만점 결정 ──────────────────────────────────────────
     # 우선순위:
     #   1. PDF possible (스코어카드에 명시된 값 - O+M/ID+C 등 시스템별 차이 자동 반영)
-    #   2. 루브릭 xlsx 조회 (data/raw/rubrics/{version}/*.xlsx - 파일 있을 때만)
+    #   2. 루브릭 xlsx 조회 (data/rubrics/{version}/*.xlsx - 파일 있을 때만)
     #   3. 하드코딩 BD+C 기준 (VERSION_BD_C_MAX + V5_MAX 최후 fallback)
     def get_old_max(cat: str) -> float:
         pdf_possible = cats_possible.get(cat, 0)

@@ -1,10 +1,10 @@
 """
 LEED 루브릭 xlsx 자동 로더
 
-data/raw/rubrics/ 폴더 구조에 파일을 넣으면 자동으로 읽힘.
+data/rubrics/ 폴더 구조에 파일을 넣으면 자동으로 읽힘.
 
 폴더 구조 (버전별 서브폴더):
-    data/raw/rubrics/
+    data/rubrics/
         v4/
             LEED_v4_BDC_New_Construction.xlsx
             LEED_v4_BDC_Core_Shell.xlsx
@@ -214,7 +214,7 @@ def _parse_rubric_xlsx(filepath: Path) -> dict:
 # 공개 API
 # =============================================================================
 
-def load_all_rubrics(rubrics_dir: str = "data/raw/rubrics") -> dict:
+def load_all_rubrics(rubrics_dir: str = "data/rubrics") -> dict:
     """
     rubrics_dir 아래 모든 xlsx 파일을 스캔하여 캐시 구성.
 
