@@ -1,0 +1,6 @@
+﻿subset,N,CV_Accuracy,CV_Accuracy_std,CV_F1,Top1,Top2,Top3
+full_460,460,0.8152,0.0471,0.8133,ratio_EA,ratio_EQ,ratio_WE
+certain_hit>0.7,324,0.8333,0.0117,0.8267,ratio_EA,ratio_EQ,ratio_WE
+old_versions,136,0.7865,0.0644,0.7794,ratio_EA,ratio_WE,ratio_LT
+new_versions,324,0.8333,0.0117,0.8267,ratio_EA,ratio_EQ,ratio_WE
+llm_reviewed_75,75,0.7067,0.0327,0.6694,ratio_EA,ratio_WE,ratio_LT
